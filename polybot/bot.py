@@ -22,7 +22,8 @@ def run_cycle(
     risk: RiskManager,
     executor,
     trade_log_path,
-) -> None:
+) -> float:
+    """Run one scan/manage/trade cycle. Returns the resulting equity estimate."""
     now = utcnow()
     mark_prices: dict[str, float] = {}
 
@@ -86,6 +87,7 @@ def run_cycle(
         len(portfolio.positions),
         portfolio.realized_pnl,
     )
+    return equity
 
 
 def main() -> None:

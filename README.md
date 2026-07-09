@@ -53,6 +53,16 @@ Every `POLYBOT_POLL_INTERVAL_SECONDS` (default 60s), one cycle runs:
 3. Portfolio state is saved to `data/portfolio.json` after every cycle;
    closed trades are appended to `data/trades.csv`.
 
+There are two ways to run it:
+
+- **`polybot`** (`polybot/bot.py`) — a plain headless loop, Ctrl+C to stop.
+  Good for local experimentation.
+- **`polybot-server`** (`polybot/main.py`) — the same loop wrapped in a
+  `BotService` (`polybot/service.py`) with a FastAPI control panel
+  (start/stop/liquidate) on top, plus optional Azure Key Vault / App
+  Configuration integration. This is what the Docker image runs, and what
+  you'd deploy to Azure.
+
 ## Quickstart (paper trading — no keys needed)
 
 ```bash
@@ -65,6 +75,18 @@ python -m polybot.bot         # or: polybot
 Watch `data/polybot.log` and `data/trades.csv` for activity. Stop any time
 with Ctrl+C — state is saved on every cycle and on shutdown, so restarting
 resumes from the same portfolio.
+
+To try the web control panel locally instead:
+
+```bash
+pip install -e ".[dev,web]"
+python -m polybot.main         # or: polybot-server
+# open http://localhost:8000
+```
+
+Without `AZURE_KEY_VAULT_URL` / `AZURE_APPCONFIG_ENDPOINT` set, this just
+reads from `.env`/the process environment like the plain `polybot` command —
+Azure is entirely optional for local use.
 
 Run tests with:
 
@@ -89,7 +111,26 @@ list with defaults), covering: poll interval, market filters (min
 volume/liquidity, price bounds), the momentum lookback window and
 threshold, exit rules (take-profit/stop-loss/max-holding-time/cooldown),
 and risk sizing (max concurrent positions, max USD per position, percent of
-equity per trade, max total exposure).
+equity per trade, max total exposure). Deployed on Azure, these same
+variables are what Key Vault and App Configuration end up populating —
+see [Deploying to Azure](#deploying-to-azure).
+
+## Web control panel
+
+`polybot-server` exposes both a JSON API and a small page at `/`:
+
+| Button / endpoint | Effect |
+| --- | --- |
+| **Başlat** — `POST /api/start` | Starts the loop if it isn't already running. |
+| **Durdur** — `POST /api/stop` | Stops opening new positions after the current cycle finishes. Existing open positions are left alone (still monitored for take-profit/stop-loss if you start it again). |
+| **Likidasyona Dön** — `POST /api/liquidate` | Emergency flatten: sells every open position at the current market price immediately, then stops the loop. Doesn't resume trading afterward — that's a deliberate choice, since auto-reopening right after a manual flatten is rarely what you want. |
+| `GET /api/status` | Current state, mode, cash, equity, realized P&L, exposure, open positions, last cycle time, last error. Polled by the page every 3s. |
+
+The desired run state (`running`/`stopped`) is persisted to
+`data/control_state.json`, so a container restart resumes whatever you last
+asked for rather than silently starting to trade or silently staying idle.
+Because state lives in-process (the portfolio, the loop thread), this is a
+**singleton service** — don't scale it beyond one replica.
 
 ## Going live
 
@@ -113,25 +154,95 @@ This is real-money automation — review the strategy and risk limits
 yourself before turning it on, and treat the live executor as a starting
 point to test carefully, not a finished product.
 
+## Deploying to Azure
+
+The bot ships as a container for **Azure Container Apps**, with:
+
+- **Azure Key Vault** holding the two real secrets (`polybot-private-key`,
+  `polybot-funder-address`), read at startup via the container's managed
+  identity (`polybot/cloud/keyvault.py`, `DefaultAzureCredential` — no
+  connection string or key ever touches the app config).
+- **Azure App Configuration** holding every strategy/risk/scan parameter
+  (momentum threshold, lookback window, position sizing, exit rules, poll
+  interval, ...) as plain `POLYBOT_*` key-values, re-read every 5 minutes
+  by default (`polybot/cloud/appconfig.py`) so you can retune the bot
+  without a redeploy. `POLYBOT_MODE`, `POLYBOT_PRIVATE_KEY`,
+  `POLYBOT_SIGNATURE_TYPE`, `POLYBOT_FUNDER_ADDRESS` and the API endpoints
+  are deliberately excluded from that refresh — flipping paper→live or
+  changing wallets always requires a real deploy, never just a config edit.
+- A single-replica **Container App** (`minReplicas`/`maxReplicas` pinned to
+  1 — the portfolio and control state are in-process/on-disk, not
+  horizontally scalable) with an **Azure Files** volume mounted at
+  `/app/data` so `portfolio.json`, `trades.csv`, and `control_state.json`
+  survive restarts and redeploys.
+- An **Azure Container Registry** the app pulls from.
+
+All of it is in `infra/main.bicep`. To deploy:
+
+```bash
+az login
+./infra/deploy.sh polybot-rg westeurope        # resource group, region
+```
+
+`infra/deploy.sh` creates the resource group, runs the Bicep deployment,
+builds the image remotely with `az acr build` (no local Docker needed —
+handy since this was developed in a sandbox without Docker access), and
+points the Container App at the freshly built image. It prints the
+control-panel URL, Key Vault name, and App Configuration name at the end.
+
+Then, for live trading:
+
+```bash
+az keyvault secret set --vault-name <keyVaultName> --name polybot-private-key --value 0x...
+az keyvault secret set --vault-name <keyVaultName> --name polybot-funder-address --value 0x...
+az deployment group create -g polybot-rg -f infra/main.bicep -p polybotMode=live
+```
+
+And to retune the strategy at any time, no redeploy needed:
+
+```bash
+az appconfig kv set --name <appConfigName> --key POLYBOT_MOMENTUM_THRESHOLD --value 0.1 --auth-mode login --yes
+```
+
+> **This infra was not deployed or validated against a real Azure
+> subscription from this sandbox** (no `az`/`bicep` CLI or Docker daemon
+> available here — outbound access is restricted to a small allowlist that
+> doesn't include Azure or Docker Hub). The Bicep was written and reviewed
+> carefully against the documented resource schemas, but run
+> `az deployment group validate` (or `--what-if`) before applying it for
+> real, and treat the first deploy as a dry run you watch closely.
+
 ## Project layout
 
 ```
 polybot/
-  config.py            settings (env-var driven)
-  models.py             Market / PricePoint / OrderBook / Signal dataclasses
+  config.py             settings (env-var driven)
+  models.py              Market / PricePoint / OrderBook / Signal dataclasses
   api/
-    http.py             retrying HTTP GET with thread-local sessions
+    http.py              retrying HTTP GET with thread-local sessions
     gamma.py             market discovery via Gamma API
     clob.py              order book + price history via CLOB API
-  strategy/momentum.py  momentum signal calculation
-  scanner.py            concurrent market/token scanning
-  portfolio.py          paper portfolio, JSON state, CSV trade log
-  risk.py               position sizing + exit rules
+  strategy/momentum.py   momentum signal calculation
+  scanner.py             concurrent market/token scanning
+  portfolio.py           paper portfolio, JSON state, CSV trade log
+  risk.py                position sizing + exit rules
   execution/
-    base.py             executor interface
-    paper.py             simulated fills (default)
-    live.py               real orders via py-clob-client
-    factory.py            picks paper vs live from settings
-  bot.py                main loop
-tests/                  unit tests for momentum, risk, portfolio
+    base.py              executor interface
+    paper.py              simulated fills (default)
+    live.py                real orders via py-clob-client
+    factory.py             picks paper vs live from settings
+  service.py             BotService: start/stop/liquidate, thread-safe loop
+  cloud/
+    keyvault.py            Key Vault secrets -> env vars
+    appconfig.py            App Configuration -> refreshed Settings
+  webapp/
+    app.py                 FastAPI control panel (start/stop/liquidate/status)
+    static/index.html        the panel itself
+  bot.py                 headless CLI loop + run_cycle()
+  main.py                polybot-server entrypoint (Azure-aware, web UI)
+tests/                   unit tests for momentum, risk, portfolio, service, webapp
+infra/
+  main.bicep             Container Apps env, ACR, Key Vault, App Config, storage
+  deploy.sh               end-to-end deploy script (az CLI, no Docker needed)
+Dockerfile               multi-stage build for the Container App image
 ```

@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>polybot control panel</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --border: #e5e7eb;
+    --card: #f9fafb; --ok: #16a34a; --warn: #d97706; --bad: #dc2626; --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --fg: #e6e8eb; --muted: #9aa3ad; --border: #262a31; --card: #171a20; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1rem 4rem; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); margin-top: 0; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.25rem; margin-bottom: 1.25rem;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.7rem;
+    border-radius: 999px; font-size: 0.85rem; font-weight: 600; border: 1px solid var(--border);
+  }
+  .dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--muted); }
+  .dot.running { background: var(--ok); }
+  .dot.stopped { background: var(--muted); }
+  .dot.liquidating { background: var(--warn); }
+  .badge.mode-live { color: var(--bad); border-color: var(--bad); }
+  .badge.mode-paper { color: var(--accent); border-color: var(--accent); }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin-top: 1rem; }
+  .metric .label { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  .metric .value { font-size: 1.3rem; font-weight: 700; margin-top: 0.15rem; }
+  .value.neg { color: var(--bad); }
+  .value.pos { color: var(--ok); }
+  .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem; }
+  button {
+    font-size: 0.95rem; font-weight: 600; padding: 0.6rem 1.1rem; border-radius: 8px;
+    border: 1px solid var(--border); cursor: pointer; background: var(--bg); color: var(--fg);
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+  table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.88rem; }
+  th, td { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; }
+  .empty { color: var(--muted); font-size: 0.9rem; padding: 0.5rem 0; }
+  .error-box {
+    background: rgba(220, 38, 38, 0.1); border: 1px solid var(--bad); color: var(--bad);
+    border-radius: 8px; padding: 0.75rem 1rem; font-size: 0.85rem; margin-top: 1rem; white-space: pre-wrap;
+  }
+  .footer-note { color: var(--muted); font-size: 0.78rem; margin-top: 1.5rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>polybot</h1>
+  <p class="subtitle">Polymarket momentum bot &middot; kontrol paneli</p>
+
+  <div class="card">
+    <div class="row">
+      <span class="badge"><span id="state-dot" class="dot"></span><span id="state-text">-</span></span>
+      <span id="mode-badge" class="badge">-</span>
+      <span class="badge" id="last-cycle-badge">-</span>
+    </div>
+
+    <div class="metrics">
+      <div class="metric"><div class="label">Equity</div><div class="value" id="m-equity">-</div></div>
+      <div class="metric"><div class="label">Nakit</div><div class="value" id="m-cash">-</div></div>
+      <div class="metric"><div class="label">Gerçekleşen K/Z</div><div class="value" id="m-pnl">-</div></div>
+      <div class="metric"><div class="label">Açık Pozisyon</div><div class="value" id="m-positions">-</div></div>
+      <div class="metric"><div class="label">Maruziyet</div><div class="value" id="m-exposure">-</div></div>
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="btn-start">Başlat</button>
+      <button id="btn-stop">Durdur</button>
+      <button class="danger" id="btn-liquidate">Likidasyona Dön</button>
+    </div>
+
+    <div id="error-box" class="error-box" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <strong>Açık Pozisyonlar</strong>
+    <table id="positions-table">
+      <thead>
+        <tr><th>Market</th><th>Outcome</th><th>Giriş</th><th>Adet</th><th>Maliyet</th><th>Açılış</th></tr>
+      </thead>
+      <tbody id="positions-body"></tbody>
+    </table>
+    <div class="empty" id="positions-empty" style="display:none">Açık pozisyon yok.</div>
+  </div>
+
+  <p class="footer-note">Durum her 3 saniyede bir yenilenir. "Durdur" yeni pozisyon açmayı durdurur (mevcutlar kalır). "Likidasyona Dön" tüm açık pozisyonları anında kapatır ve botu durdurur.</p>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmtUsd = (v) => (v === null || v === undefined) ? "-" : "$" + Number(v).toFixed(2);
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
+  return res.json();
+}
+
+function renderStatus(s) {
+  const dot = $("state-dot");
+  dot.className = "dot " + s.state;
+  $("state-text").textContent = {running: "Çalışıyor", stopped: "Durduruldu", liquidating: "Likidasyon"}[s.state] || s.state;
+
+  const modeBadge = $("mode-badge");
+  modeBadge.textContent = s.mode === "live" ? "LIVE (gerçek para)" : "PAPER (simülasyon)";
+  modeBadge.className = "badge " + (s.mode === "live" ? "mode-live" : "mode-paper");
+
+  $("last-cycle-badge").textContent = s.last_cycle_at ? ("son döngü: " + new Date(s.last_cycle_at).toLocaleTimeString()) : "henüz döngü yok";
+
+  $("m-equity").textContent = fmtUsd(s.equity);
+  $("m-cash").textContent = fmtUsd(s.cash);
+  const pnlEl = $("m-pnl");
+  pnlEl.textContent = fmtUsd(s.realized_pnl);
+  pnlEl.className = "value " + (s.realized_pnl > 0 ? "pos" : s.realized_pnl < 0 ? "neg" : "");
+  $("m-positions").textContent = s.open_positions.length;
+  $("m-exposure").textContent = fmtUsd(s.exposure_usd);
+
+  const body = $("positions-body");
+  body.innerHTML = "";
+  for (const p of s.open_positions) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${p.market_question}</td><td>${p.outcome}</td><td>${Number(p.entry_price).toFixed(4)}</td>` +
+      `<td>${Number(p.size_tokens).toFixed(2)}</td><td>${fmtUsd(p.cost_usd)}</td>` +
+      `<td>${new Date(p.opened_at).toLocaleString()}</td>`;
+    body.appendChild(tr);
+  }
+  $("positions-empty").style.display = s.open_positions.length ? "none" : "block";
+  $("positions-table").style.display = s.open_positions.length ? "table" : "none";
+
+  const errBox = $("error-box");
+  if (s.last_error) {
+    errBox.style.display = "block";
+    errBox.textContent = "Son hata: " + s.last_error;
+  } else {
+    errBox.style.display = "none";
+  }
+
+  $("btn-start").disabled = s.state === "running";
+  $("btn-stop").disabled = s.state !== "running";
+}
+
+async function refresh() {
+  try {
+    renderStatus(await api("/api/status"));
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+$("btn-start").addEventListener("click", async () => {
+  $("btn-start").disabled = true;
+  await api("/api/start", { method: "POST" });
+  refresh();
+});
+
+$("btn-stop").addEventListener("click", async () => {
+  $("btn-stop").disabled = true;
+  await api("/api/stop", { method: "POST" });
+  refresh();
+});
+
+$("btn-liquidate").addEventListener("click", async () => {
+  if (!confirm("Tüm açık pozisyonlar piyasa fiyatından kapatılacak ve bot durdurulacak. Emin misiniz?")) return;
+  $("btn-liquidate").disabled = true;
+  try {
+    await api("/api/liquidate", { method: "POST" });
+  } finally {
+    $("btn-liquidate").disabled = false;
+    refresh();
+  }
+});
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

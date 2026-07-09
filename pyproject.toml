@@ -11,12 +11,23 @@ dependencies = [
 live = [
     "py-clob-client>=0.20",
 ]
+web = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+]
+azure = [
+    "azure-identity>=1.16",
+    "azure-keyvault-secrets>=4.8",
+    "azure-appconfiguration>=1.5",
+]
 dev = [
     "pytest>=8.0",
+    "httpx>=0.27",
 ]
 
 [project.scripts]
 polybot = "polybot.bot:main"
+polybot-server = "polybot.main:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
