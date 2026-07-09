@@ -50,3 +50,11 @@ class Signal:
     momentum: float
     reference_price: float
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass(frozen=True)
+class WalletBuy:
+    wallet: str
+    token_id: str
+    usd_size: float
+    timestamp: datetime

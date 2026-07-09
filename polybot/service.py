@@ -12,6 +12,7 @@ from .config import Settings
 from .execution.factory import get_executor
 from .portfolio import Portfolio, utcnow
 from .risk import RiskManager
+from .strategy.smart_money import SmartMoneyTracker
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,9 @@ class BotService:
         self.portfolio = Portfolio.load_or_create(self.portfolio_path, settings.starting_cash)
         self.risk = RiskManager(settings)
         self.executor = get_executor(settings)
+        # Always constructed (cheap, inert until settings.smart_wallet_enabled is
+        # true) so flipping it on via App Configuration works without a restart.
+        self.smart_money = SmartMoneyTracker()
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -175,7 +179,12 @@ class BotService:
                         self.risk = RiskManager(refreshed)
                 with self.lock:
                     equity = run_cycle(
-                        self.settings, self.portfolio, self.risk, self.executor, self.trade_log_path
+                        self.settings,
+                        self.portfolio,
+                        self.risk,
+                        self.executor,
+                        self.trade_log_path,
+                        smart_money=self.smart_money,
                     )
                     self.portfolio.save(self.portfolio_path)
                     self.last_equity = equity

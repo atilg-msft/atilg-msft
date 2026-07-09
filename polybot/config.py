@@ -42,6 +42,11 @@ class Settings:
             "POLYBOT_GAMMA_API_URL", "https://gamma-api.polymarket.com"
         )
     )
+    data_api_url: str = field(
+        default_factory=lambda: os.environ.get(
+            "POLYBOT_DATA_API_URL", "https://data-api.polymarket.com"
+        )
+    )
     chain_id: int = field(default_factory=lambda: _env_int("POLYBOT_CHAIN_ID", 137))
 
     # Market scanning / filters
@@ -77,6 +82,26 @@ class Settings:
     )
     cooldown_minutes: int = field(
         default_factory=lambda: _env_int("POLYBOT_COOLDOWN_MINUTES", 30)
+    )
+
+    # Smart-money confirmation filter (opt-in; see polybot/strategy/smart_money.py)
+    smart_wallet_enabled: bool = field(
+        default_factory=lambda: _env_bool("POLYBOT_SMART_WALLET_ENABLED", False)
+    )
+    smart_wallet_count: int = field(
+        default_factory=lambda: _env_int("POLYBOT_SMART_WALLET_COUNT", 30)
+    )
+    smart_wallet_leaderboard_period: str = field(
+        default_factory=lambda: os.environ.get("POLYBOT_SMART_WALLET_PERIOD", "month")
+    )
+    smart_wallet_refresh_minutes: int = field(
+        default_factory=lambda: _env_int("POLYBOT_SMART_WALLET_REFRESH_MINUTES", 360)
+    )
+    smart_wallet_lookback_minutes: int = field(
+        default_factory=lambda: _env_int("POLYBOT_SMART_WALLET_LOOKBACK_MINUTES", 30)
+    )
+    smart_wallet_overrides: str = field(
+        default_factory=lambda: os.environ.get("POLYBOT_SMART_WALLET_OVERRIDES", "")
     )
 
     # Risk / position sizing

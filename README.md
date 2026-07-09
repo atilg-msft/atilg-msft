@@ -47,6 +47,9 @@ Every `POLYBOT_POLL_INTERVAL_SECONDS` (default 60s), one cycle runs:
    - Tokens whose momentum clears `POLYBOT_MOMENTUM_THRESHOLD`, and whose
      price isn't already near 0 or 1 (no edge left near resolution), become
      candidate signals, ranked by strength.
+   - If `POLYBOT_SMART_WALLET_ENABLED=true`, candidates are then filtered
+     down to ones a tracked high-PnL wallet also just bought (see
+     [Smart-money confirmation filter](#smart-money-confirmation-filter)).
    - Signals are opened in order, sized by `RiskManager` (percent-of-equity,
      capped by a max USD per position, total position count, and total
      exposure as a percent of equity), until the budget runs out.
@@ -131,6 +134,48 @@ The desired run state (`running`/`stopped`) is persisted to
 asked for rather than silently starting to trade or silently staying idle.
 Because state lives in-process (the portfolio, the loop thread), this is a
 **singleton service** — don't scale it beyond one replica.
+
+## Smart-money confirmation filter
+
+Set `POLYBOT_SMART_WALLET_ENABLED=true` to require momentum candidates to
+also line up with what Polymarket's own highest-PnL traders are doing
+(`polybot/strategy/smart_money.py`, `polybot/api/data_api.py`):
+
+1. Every `POLYBOT_SMART_WALLET_REFRESH_MINUTES` (default 6h), it pulls the
+   top `POLYBOT_SMART_WALLET_COUNT` wallets from Polymarket's public
+   leaderboard, ranked by PnL over `POLYBOT_SMART_WALLET_PERIOD`
+   (`day`/`week`/`month`), plus anything listed in
+   `POLYBOT_SMART_WALLET_OVERRIDES` (comma-separated addresses you add
+   yourself — useful if you've found specific wallets worth following, or
+   as a fallback if the leaderboard call ever breaks).
+2. Every cycle, it pulls each tracked wallet's recent trade activity and
+   keeps the latest BUY per token within `POLYBOT_SMART_WALLET_LOOKBACK_MINUTES`.
+3. A momentum candidate only survives if a tracked wallet bought that exact
+   token within that window. If the confirmation check itself fails (API
+   unreachable), **all candidates are dropped for that cycle** — fail
+   closed, since the whole point is not trading without confirmation.
+
+This exists because raw PnL and raw volume are both misleading on their
+own: a wallet's all-time profit can come from one lucky long-shot bet
+rather than skill, and Polymarket's highest-*volume* wallets are often
+market makers with no directional view at all. Requiring momentum *and* a
+tracked wallet buying the same outcome cuts down on both false-positive
+types, at the cost of fewer trades.
+
+> **Verify before relying on this.** `data-api.polymarket.com`'s
+> leaderboard/activity endpoints and field names were not reachable from
+> the sandbox this was built in (see the network note above), so
+> `get_leaderboard`/`get_wallet_activity` in `polybot/api/data_api.py` are
+> based on `polymarket-cli`'s documented `data leaderboard`/`data activity`
+> commands rather than a live-verified response shape. Parsing is
+> defensive (it tries several likely field names and skips what it can't
+> parse) and logs the real field names it sees the first time it gets a
+> response (`data-api leaderboard sample fields: [...]` in the log) — check
+> that log line against `_WALLET_KEYS`/`_TOKEN_KEYS`/etc. at the top of
+> `data_api.py` after your first run, and adjust if they don't match.
+> Until you've confirmed it's actually returning wallets, this stays
+> disabled (`POLYBOT_SMART_WALLET_ENABLED=false` is the default) so it
+> can't silently zero out every trade.
 
 ## Going live
 
@@ -222,7 +267,10 @@ polybot/
     http.py              retrying HTTP GET with thread-local sessions
     gamma.py             market discovery via Gamma API
     clob.py              order book + price history via CLOB API
-  strategy/momentum.py   momentum signal calculation
+    data_api.py           leaderboard + wallet activity via the Data API
+  strategy/
+    momentum.py           momentum signal calculation
+    smart_money.py          leaderboard-wallet confirmation filter
   scanner.py             concurrent market/token scanning
   portfolio.py           paper portfolio, JSON state, CSV trade log
   risk.py                position sizing + exit rules
@@ -240,7 +288,7 @@ polybot/
     static/index.html        the panel itself
   bot.py                 headless CLI loop + run_cycle()
   main.py                polybot-server entrypoint (Azure-aware, web UI)
-tests/                   unit tests for momentum, risk, portfolio, service, webapp
+tests/                   unit tests for momentum, risk, portfolio, service, webapp, smart_money, data_api
 infra/
   main.bicep             Container Apps env, ACR, Key Vault, App Config, storage
   deploy.sh               end-to-end deploy script (az CLI, no Docker needed)

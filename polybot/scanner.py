@@ -9,6 +9,7 @@ from .config import Settings
 from .models import Market, Signal
 from .portfolio import Portfolio
 from .strategy import momentum
+from .strategy.smart_money import SmartMoneyTracker
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,11 @@ def _evaluate_token(settings: Settings, market: Market, token_id: str) -> Signal
 
 
 def generate_signals(
-    settings: Settings, markets: list[Market], portfolio: Portfolio, now: datetime
+    settings: Settings,
+    markets: list[Market],
+    portfolio: Portfolio,
+    now: datetime,
+    smart_money: SmartMoneyTracker | None = None,
 ) -> list[Signal]:
     """Fan out price-history/order-book lookups across a thread pool, mirroring
     poly_data's concurrent-fetch pattern in update_markets.py."""
@@ -54,5 +59,35 @@ def generate_signals(
             if signal is not None:
                 signals.append(signal)
 
+    if settings.smart_wallet_enabled and smart_money is not None:
+        signals = _apply_smart_money_filter(settings, signals, smart_money)
+
     signals.sort(key=lambda s: s.momentum, reverse=True)
     return signals
+
+
+def _apply_smart_money_filter(
+    settings: Settings, signals: list[Signal], smart_money: SmartMoneyTracker
+) -> list[Signal]:
+    if not signals:
+        return signals
+    try:
+        smart_money.refresh_recent_buys(settings)
+    except Exception:
+        logger.exception("smart-money refresh failed; dropping all candidate signals this cycle")
+        return []
+
+    confirmed = []
+    for signal in signals:
+        buy = smart_money.confirms(signal.token_id)
+        if buy is None:
+            logger.debug("no smart-money confirmation for %s, dropping candidate", signal.token_id)
+            continue
+        logger.info(
+            "smart-money confirmed %s: wallet %s bought $%.2f",
+            signal.market_question[:60],
+            buy.wallet,
+            buy.usd_size,
+        )
+        confirmed.append(signal)
+    return confirmed

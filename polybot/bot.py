@@ -10,6 +10,7 @@ from .logging_conf import setup_logging
 from .portfolio import Portfolio, utcnow
 from .risk import RiskManager
 from .scanner import generate_signals
+from .strategy.smart_money import SmartMoneyTracker
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ def run_cycle(
     risk: RiskManager,
     executor,
     trade_log_path,
+    smart_money: SmartMoneyTracker | None = None,
 ) -> float:
     """Run one scan/manage/trade cycle. Returns the resulting equity estimate."""
     now = utcnow()
@@ -52,8 +54,8 @@ def run_cycle(
     # 2. Look for new entries only if there's room under the risk budget.
     if risk.can_open_new_position(portfolio, equity):
         markets = discover_markets(settings)
-        signals = generate_signals(settings, markets, portfolio, now)
-        logger.info("scanned %d markets, %d momentum signals", len(markets), len(signals))
+        signals = generate_signals(settings, markets, portfolio, now, smart_money=smart_money)
+        logger.info("scanned %d markets, %d signals after filters", len(markets), len(signals))
 
         for signal in signals:
             if not risk.can_open_new_position(portfolio, equity):
@@ -105,11 +107,12 @@ def main() -> None:
     portfolio = Portfolio.load_or_create(portfolio_path, settings.starting_cash)
     risk = RiskManager(settings)
     executor = get_executor(settings)
+    smart_money = SmartMoneyTracker() if settings.smart_wallet_enabled else None
 
     try:
         while True:
             try:
-                run_cycle(settings, portfolio, risk, executor, trade_log_path)
+                run_cycle(settings, portfolio, risk, executor, trade_log_path, smart_money=smart_money)
             except Exception:
                 logger.exception("cycle failed, will retry after poll interval")
             finally:
