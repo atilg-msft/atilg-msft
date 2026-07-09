@@ -59,7 +59,7 @@ def generate_signals(
             if signal is not None:
                 signals.append(signal)
 
-    if settings.smart_wallet_enabled and smart_money is not None:
+    if settings.signal_filter == "smart_money" and smart_money is not None:
         signals = _apply_smart_money_filter(settings, signals, smart_money)
 
     signals.sort(key=lambda s: s.momentum, reverse=True)

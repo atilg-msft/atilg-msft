@@ -90,3 +90,80 @@ def test_desired_state_survives_ungraceful_restart(tmp_path, monkeypatch):
         assert service2.status()["state"] == "running"
     finally:
         service2.stop()
+
+
+def test_get_strategy_info_defaults(tmp_path, monkeypatch):
+    monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    service = BotService(make_settings(tmp_path))
+    try:
+        info = service.get_strategy_info()
+        assert info["strategy"] == "momentum"
+        assert info["signal_filter"] == "none"
+        assert info["strategy_options"] == ["momentum"]
+        assert "smart_money" in info["signal_filter_options"]
+        assert info["overridden"] is False
+    finally:
+        service.stop()
+
+
+def test_set_strategy_persists_and_overrides_app_config(tmp_path, monkeypatch):
+    monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    settings = make_settings(tmp_path)
+    service = BotService(settings)
+    try:
+        info = service.set_strategy(strategy=None, signal_filter="smart_money")
+        assert info["signal_filter"] == "smart_money"
+        assert info["overridden"] is True
+        assert service.settings.signal_filter == "smart_money"
+        assert (tmp_path / "strategy_override.json").exists()
+
+        # A settings_provider (e.g. App Configuration refresh) that would
+        # reset signal_filter back to "none" must not win over the override.
+        service.settings_provider = lambda: Settings(data_dir=tmp_path, signal_filter="none")
+        with service.lock:
+            refreshed = service.settings_provider()
+            if service._manual_overrides:
+                from dataclasses import replace
+
+                refreshed = replace(refreshed, **service._manual_overrides)
+            service.settings = refreshed
+        assert service.settings.signal_filter == "smart_money"
+    finally:
+        service.stop()
+
+
+def test_set_strategy_rejects_invalid_choice(tmp_path, monkeypatch):
+    monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    service = BotService(make_settings(tmp_path))
+    try:
+        try:
+            service.set_strategy(strategy=None, signal_filter="not-a-real-option")
+            assert False, "expected ValueError"
+        except ValueError:
+            pass
+        assert service.get_strategy_info()["overridden"] is False
+    finally:
+        service.stop()
+
+
+def test_strategy_override_survives_restart(tmp_path, monkeypatch):
+    monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    settings = make_settings(tmp_path)
+    service1 = BotService(settings)
+    service1.set_strategy(strategy=None, signal_filter="smart_money")
+    service1.stop()
+
+    service2 = BotService(settings)
+    try:
+        assert service2.get_strategy_info()["signal_filter"] == "smart_money"
+        assert service2.get_strategy_info()["overridden"] is True
+    finally:
+        service2.stop()

@@ -47,7 +47,8 @@ Every `POLYBOT_POLL_INTERVAL_SECONDS` (default 60s), one cycle runs:
    - Tokens whose momentum clears `POLYBOT_MOMENTUM_THRESHOLD`, and whose
      price isn't already near 0 or 1 (no edge left near resolution), become
      candidate signals, ranked by strength.
-   - If `POLYBOT_SMART_WALLET_ENABLED=true`, candidates are then filtered
+   - If `POLYBOT_SIGNAL_FILTER=smart_money` (env var, App Configuration, or
+     the control panel's **Sinyal** dropdown), candidates are then filtered
      down to ones a tracked high-PnL wallet also just bought (see
      [Smart-money confirmation filter](#smart-money-confirmation-filter)).
    - Signals are opened in order, sized by `RiskManager` (percent-of-equity,
@@ -135,11 +136,32 @@ asked for rather than silently starting to trade or silently staying idle.
 Because state lives in-process (the portfolio, the loop thread), this is a
 **singleton service** — don't scale it beyond one replica.
 
+There's also a **Strateji** card with two dropdowns:
+
+- **Strateji** — which strategy generates candidate signals. Only
+  `Momentum` exists today; the dropdown is there so adding a second
+  strategy later doesn't need new UI.
+- **Sinyal** — `Yok` (momentum trades on its own) or `Akıllı Cüzdan Onayı`
+  (momentum candidates are also required to match a
+  [tracked wallet's recent buy](#smart-money-confirmation-filter)).
+
+Saving calls `POST /api/strategy` (`GET /api/strategy` reads the current
+selection), and the choice is persisted to `data/strategy_override.json`.
+Once you've picked something from the panel, it **wins over
+`POLYBOT_STRATEGY`/`POLYBOT_SIGNAL_FILTER` from env vars or App
+Configuration** and survives restarts — otherwise a routine App
+Configuration refresh could silently revert an operator's explicit choice
+back to the deployed default, which would be more confusing than useful.
+
 ## Smart-money confirmation filter
 
-Set `POLYBOT_SMART_WALLET_ENABLED=true` to require momentum candidates to
-also line up with what Polymarket's own highest-PnL traders are doing
-(`polybot/strategy/smart_money.py`, `polybot/api/data_api.py`):
+Set `POLYBOT_SIGNAL_FILTER=smart_money` (env var/App Configuration) or pick
+**Akıllı Cüzdan Onayı** from the control panel's **Sinyal** dropdown to
+require momentum candidates to also line up with what Polymarket's own
+highest-PnL traders are doing (`polybot/strategy/smart_money.py`,
+`polybot/api/data_api.py`). The other option, **Yok**
+(`POLYBOT_SIGNAL_FILTER=none`, the default), runs momentum on its own with
+no confirmation step:
 
 1. Every `POLYBOT_SMART_WALLET_REFRESH_MINUTES` (default 6h), it pulls the
    top `POLYBOT_SMART_WALLET_COUNT` wallets from Polymarket's public
@@ -173,9 +195,9 @@ types, at the cost of fewer trades.
 > response (`data-api leaderboard sample fields: [...]` in the log) — check
 > that log line against `_WALLET_KEYS`/`_TOKEN_KEYS`/etc. at the top of
 > `data_api.py` after your first run, and adjust if they don't match.
-> Until you've confirmed it's actually returning wallets, this stays
-> disabled (`POLYBOT_SMART_WALLET_ENABLED=false` is the default) so it
-> can't silently zero out every trade.
+> Until you've confirmed it's actually returning wallets, leave this off
+> (`POLYBOT_SIGNAL_FILTER=none` is the default) so it can't silently zero
+> out every trade.
 
 ## Going live
 
@@ -218,8 +240,8 @@ The bot ships as a container for **Azure Container Apps**, with:
 - A single-replica **Container App** (`minReplicas`/`maxReplicas` pinned to
   1 — the portfolio and control state are in-process/on-disk, not
   horizontally scalable) with an **Azure Files** volume mounted at
-  `/app/data` so `portfolio.json`, `trades.csv`, and `control_state.json`
-  survive restarts and redeploys.
+  `/app/data` so `portfolio.json`, `trades.csv`, `control_state.json`, and
+  `strategy_override.json` survive restarts and redeploys.
 - An **Azure Container Registry** the app pulls from.
 
 All of it is in `infra/main.bicep`. To deploy:

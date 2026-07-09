@@ -20,6 +20,17 @@ def _env_bool(name: str, default: bool) -> bool:
     return val.strip().lower() in ("1", "true", "yes", "on")
 
 
+# Only "momentum" exists today; kept as a list (not a bare constant) so the
+# web UI's strategy dropdown and the validation below have one place to grow
+# from if a second strategy is ever added.
+STRATEGY_CHOICES = ["momentum"]
+
+# "none" = momentum signals trade on their own. "smart_money" = a momentum
+# signal only survives if a tracked high-PnL wallet also just bought the
+# same token (see polybot/strategy/smart_money.py).
+SIGNAL_FILTER_CHOICES = ["none", "smart_money"]
+
+
 @dataclass
 class Settings:
     # Runtime mode
@@ -84,10 +95,16 @@ class Settings:
         default_factory=lambda: _env_int("POLYBOT_COOLDOWN_MINUTES", 30)
     )
 
-    # Smart-money confirmation filter (opt-in; see polybot/strategy/smart_money.py)
-    smart_wallet_enabled: bool = field(
-        default_factory=lambda: _env_bool("POLYBOT_SMART_WALLET_ENABLED", False)
+    # Strategy + signal selection (also settable at runtime from the web
+    # control panel -- see BotService.set_strategy(); a UI selection there
+    # takes precedence over these env/App-Config-sourced defaults).
+    strategy: str = field(default_factory=lambda: os.environ.get("POLYBOT_STRATEGY", "momentum"))
+    signal_filter: str = field(
+        default_factory=lambda: os.environ.get("POLYBOT_SIGNAL_FILTER", "none")
     )
+
+    # Smart-money confirmation filter params (used when signal_filter == "smart_money";
+    # see polybot/strategy/smart_money.py)
     smart_wallet_count: int = field(
         default_factory=lambda: _env_int("POLYBOT_SMART_WALLET_COUNT", 30)
     )
@@ -144,6 +161,12 @@ class Settings:
             raise ValueError(f"Invalid POLYBOT_MODE: {self.mode!r} (expected 'paper' or 'live')")
         if self.signature_type not in ("proxy", "eoa", "gnosis-safe"):
             raise ValueError(f"Invalid POLYBOT_SIGNATURE_TYPE: {self.signature_type!r}")
+        if self.strategy not in STRATEGY_CHOICES:
+            raise ValueError(f"Invalid POLYBOT_STRATEGY: {self.strategy!r} (choices: {STRATEGY_CHOICES})")
+        if self.signal_filter not in SIGNAL_FILTER_CHOICES:
+            raise ValueError(
+                f"Invalid POLYBOT_SIGNAL_FILTER: {self.signal_filter!r} (choices: {SIGNAL_FILTER_CHOICES})"
+            )
         if self.mode == "live" and not self.private_key:
             raise ValueError(
                 "POLYBOT_MODE=live requires POLYBOT_PRIVATE_KEY to be set"

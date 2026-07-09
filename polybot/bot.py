@@ -107,7 +107,7 @@ def main() -> None:
     portfolio = Portfolio.load_or_create(portfolio_path, settings.starting_cash)
     risk = RiskManager(settings)
     executor = get_executor(settings)
-    smart_money = SmartMoneyTracker() if settings.smart_wallet_enabled else None
+    smart_money = SmartMoneyTracker()
 
     try:
         while True:

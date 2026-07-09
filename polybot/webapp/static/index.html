@@ -49,6 +49,16 @@
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+  select {
+    font-size: 0.95rem; padding: 0.5rem 0.7rem; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--fg); min-width: 200px;
+  }
+  .field { display: flex; flex-direction: column; gap: 0.3rem; }
+  .field label { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  .hint { color: var(--muted); font-size: 0.82rem; margin-top: 0.75rem; }
+  .save-note { font-size: 0.85rem; margin-top: 0.6rem; display: none; }
+  .save-note.ok { color: var(--ok); display: block; }
+  .save-note.err { color: var(--bad); display: block; }
   table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.88rem; }
   th, td { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--border); }
   th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; }
@@ -87,6 +97,23 @@
     </div>
 
     <div id="error-box" class="error-box" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <strong>Strateji</strong>
+    <div class="row" style="margin-top: 0.75rem">
+      <div class="field">
+        <label for="sel-strategy">Strateji</label>
+        <select id="sel-strategy"></select>
+      </div>
+      <div class="field">
+        <label for="sel-signal">Sinyal</label>
+        <select id="sel-signal"></select>
+      </div>
+      <button class="primary" id="btn-save-strategy" style="align-self: flex-end">Kaydet</button>
+    </div>
+    <p class="hint">"Sinyal: Yok" seçilirse bot yalnızca momentum ile çalışır. "Akıllı Cüzdan Onayı" seçilirse, momentum sinyali yalnızca izlenen yüksek kazançlı bir cüzdan da aynı yönde alım yapmışsa işleme girer.</p>
+    <div class="save-note" id="strategy-save-note"></div>
   </div>
 
   <div class="card">
@@ -187,7 +214,48 @@ $("btn-liquidate").addEventListener("click", async () => {
   }
 });
 
+const STRATEGY_LABELS = { momentum: "Momentum" };
+const SIGNAL_FILTER_LABELS = { none: "Yok (sadece momentum)", smart_money: "Akıllı Cüzdan Onayı" };
+
+function fillSelect(select, options, labels, selected) {
+  select.innerHTML = "";
+  for (const opt of options) {
+    const el = document.createElement("option");
+    el.value = opt;
+    el.textContent = labels[opt] || opt;
+    if (opt === selected) el.selected = true;
+    select.appendChild(el);
+  }
+}
+
+async function loadStrategy() {
+  const info = await api("/api/strategy");
+  fillSelect($("sel-strategy"), info.strategy_options, STRATEGY_LABELS, info.strategy);
+  fillSelect($("sel-signal"), info.signal_filter_options, SIGNAL_FILTER_LABELS, info.signal_filter);
+}
+
+$("btn-save-strategy").addEventListener("click", async () => {
+  const note = $("strategy-save-note");
+  $("btn-save-strategy").disabled = true;
+  try {
+    await api("/api/strategy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ strategy: $("sel-strategy").value, signal_filter: $("sel-signal").value }),
+    });
+    note.textContent = "Kaydedildi.";
+    note.className = "save-note ok";
+  } catch (e) {
+    note.textContent = "Kaydedilemedi: " + e.message;
+    note.className = "save-note err";
+  } finally {
+    $("btn-save-strategy").disabled = false;
+    setTimeout(() => { note.className = "save-note"; }, 4000);
+  }
+});
+
 refresh();
+loadStrategy();
 setInterval(refresh, 3000);
 </script>
 </body>

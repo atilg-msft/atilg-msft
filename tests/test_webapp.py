@@ -35,3 +35,27 @@ def test_control_panel_start_stop_liquidate(tmp_path, monkeypatch):
         assert result["status"]["state"] == "stopped"
     finally:
         service.stop()
+
+
+def test_strategy_selection_endpoints(tmp_path, monkeypatch):
+    monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    settings = Settings(data_dir=tmp_path, poll_interval_seconds=1)
+    service = BotService(settings)
+    client = TestClient(create_app(service))
+
+    try:
+        info = client.get("/api/strategy").json()
+        assert info["strategy"] == "momentum"
+        assert info["signal_filter"] == "none"
+        assert info["overridden"] is False
+
+        info = client.post("/api/strategy", json={"signal_filter": "smart_money"}).json()
+        assert info["signal_filter"] == "smart_money"
+        assert info["overridden"] is True
+
+        resp = client.post("/api/strategy", json={"signal_filter": "not-real"})
+        assert resp.status_code == 400
+    finally:
+        service.stop()

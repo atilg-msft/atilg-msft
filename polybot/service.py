@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from enum import Enum
 from typing import Callable
 
 from .bot import run_cycle
-from .config import Settings
+from .config import SIGNAL_FILTER_CHOICES, STRATEGY_CHOICES, Settings
 from .execution.factory import get_executor
 from .portfolio import Portfolio, utcnow
 from .risk import RiskManager
@@ -52,13 +52,24 @@ class BotService:
         self.portfolio_path = settings.data_dir / "portfolio.json"
         self.trade_log_path = settings.data_dir / "trades.csv"
         self.control_state_path = settings.data_dir / "control_state.json"
+        self.strategy_override_path = settings.data_dir / "strategy_override.json"
 
         self.lock = threading.RLock()
         self.portfolio = Portfolio.load_or_create(self.portfolio_path, settings.starting_cash)
-        self.risk = RiskManager(settings)
+
+        # A strategy/signal_filter chosen from the control panel is persisted
+        # here and takes precedence over whatever env vars/App Configuration
+        # say, so a container restart resumes the operator's explicit choice
+        # instead of reverting to the deployed default.
+        self._manual_overrides: dict = self._load_strategy_override()
+        if self._manual_overrides:
+            self.settings = replace(self.settings, **self._manual_overrides)
+
+        self.risk = RiskManager(self.settings)
         self.executor = get_executor(settings)
-        # Always constructed (cheap, inert until settings.smart_wallet_enabled is
-        # true) so flipping it on via App Configuration works without a restart.
+        # Always constructed (cheap, inert unless settings.signal_filter ==
+        # "smart_money") so flipping it on via config or the control panel
+        # works without a restart.
         self.smart_money = SmartMoneyTracker()
 
         self._stop_event = threading.Event()
@@ -85,6 +96,53 @@ class BotService:
 
     def _save_desired_state(self, state: BotState) -> None:
         self.control_state_path.write_text(json.dumps({"state": state.value}))
+
+    def _load_strategy_override(self) -> dict:
+        if not self.strategy_override_path.exists():
+            return {}
+        try:
+            data = json.loads(self.strategy_override_path.read_text())
+        except Exception:
+            logger.warning("could not read strategy_override.json, ignoring")
+            return {}
+        return {k: v for k, v in data.items() if k in ("strategy", "signal_filter")}
+
+    def _save_strategy_override(self) -> None:
+        self.strategy_override_path.write_text(json.dumps(self._manual_overrides))
+
+    # -- strategy selection -----------------------------------------------------
+
+    def get_strategy_info(self) -> dict:
+        with self.lock:
+            return {
+                "strategy": self.settings.strategy,
+                "signal_filter": self.settings.signal_filter,
+                "strategy_options": STRATEGY_CHOICES,
+                "signal_filter_options": SIGNAL_FILTER_CHOICES,
+                "overridden": bool(self._manual_overrides),
+            }
+
+    def set_strategy(self, strategy: str | None, signal_filter: str | None) -> dict:
+        if strategy is not None and strategy not in STRATEGY_CHOICES:
+            raise ValueError(f"Invalid strategy: {strategy!r} (choices: {STRATEGY_CHOICES})")
+        if signal_filter is not None and signal_filter not in SIGNAL_FILTER_CHOICES:
+            raise ValueError(
+                f"Invalid signal_filter: {signal_filter!r} (choices: {SIGNAL_FILTER_CHOICES})"
+            )
+        with self.lock:
+            if strategy is not None:
+                self._manual_overrides["strategy"] = strategy
+            if signal_filter is not None:
+                self._manual_overrides["signal_filter"] = signal_filter
+            self._save_strategy_override()
+            self.settings = replace(self.settings, **self._manual_overrides)
+            self.risk = RiskManager(self.settings)
+            logger.info(
+                "strategy selection updated: strategy=%s signal_filter=%s",
+                self.settings.strategy,
+                self.settings.signal_filter,
+            )
+            return self.get_strategy_info()
 
     # -- control API ----------------------------------------------------------
 
@@ -157,6 +215,8 @@ class BotService:
             return {
                 "state": self.state.value,
                 "mode": self.settings.mode,
+                "strategy": self.settings.strategy,
+                "signal_filter": self.settings.signal_filter,
                 "cash": self.portfolio.cash,
                 "equity": self.last_equity,
                 "realized_pnl": self.portfolio.realized_pnl,
@@ -175,6 +235,8 @@ class BotService:
                 if self.settings_provider is not None:
                     refreshed = self.settings_provider()
                     with self.lock:
+                        if self._manual_overrides:
+                            refreshed = replace(refreshed, **self._manual_overrides)
                         self.settings = refreshed
                         self.risk = RiskManager(refreshed)
                 with self.lock:
