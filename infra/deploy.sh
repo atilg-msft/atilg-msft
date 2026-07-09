@@ -6,15 +6,16 @@
 # the image is built remotely with `az acr build`.
 #
 # Usage:
-#   ./infra/deploy.sh <resource-group> <location> [namePrefix] [polybotMode]
+#   ./infra/deploy.sh <resource-group> [location] [namePrefix] [polybotMode]
 #
 # Example:
-#   ./infra/deploy.sh polybot-rg westeurope polybot paper
+#   ./infra/deploy.sh polybot-rg                    # deploys to centralus
+#   ./infra/deploy.sh polybot-rg westeurope          # or override the region
 
 set -euo pipefail
 
-RESOURCE_GROUP="${1:?Usage: deploy.sh <resource-group> <location> [namePrefix] [polybotMode]}"
-LOCATION="${2:?location is required, e.g. westeurope}"
+RESOURCE_GROUP="${1:?Usage: deploy.sh <resource-group> [location] [namePrefix] [polybotMode]}"
+LOCATION="${2:-centralus}"
 NAME_PREFIX="${3:-polybot}"
 POLYBOT_MODE="${4:-paper}"
 

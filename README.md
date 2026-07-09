@@ -248,7 +248,7 @@ All of it is in `infra/main.bicep`. To deploy:
 
 ```bash
 az login
-./infra/deploy.sh polybot-rg westeurope        # resource group, region
+./infra/deploy.sh polybot-rg                   # resource group; defaults to centralus
 ```
 
 `infra/deploy.sh` creates the resource group, runs the Bicep deployment,
