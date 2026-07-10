@@ -87,6 +87,10 @@
   <h1>polybot</h1>
   <p class="subtitle">Polymarket momentum bot &middot; kontrol paneli</p>
 
+  <div id="conn-error-box" class="error-box" style="display:none">
+    Sunucuya ulaşılamıyor. Bağlantı sorunu olabilir (ağ/mobil veri) — sayfa otomatik olarak yeniden denemeye devam ediyor, veri geldiğinde bu uyarı kaybolur.
+  </div>
+
   <div class="card">
     <div class="row">
       <span class="badge"><span id="state-dot" class="dot"></span><span id="state-text">-</span></span>
@@ -246,12 +250,17 @@ function renderTrades(trades) {
   $("trades-table").style.display = trades.length ? "table" : "none";
 }
 
+let strategyLoaded = false;
+
 async function refresh() {
   try {
     renderStatus(await api("/api/status"));
     renderTrades(await api("/api/trades?limit=20"));
+    if (!strategyLoaded) await loadStrategy();
+    $("conn-error-box").style.display = "none";
   } catch (e) {
     console.error(e);
+    $("conn-error-box").style.display = "block";
   }
 }
 
@@ -311,6 +320,7 @@ async function loadStrategy() {
   const info = await api("/api/strategy");
   fillSelect($("sel-strategy"), info.strategy_options, STRATEGY_LABELS, info.strategy);
   fillSelect($("sel-signal"), info.signal_filter_options, SIGNAL_FILTER_LABELS, info.signal_filter);
+  strategyLoaded = true;
 }
 
 $("btn-save-strategy").addEventListener("click", async () => {
@@ -334,7 +344,6 @@ $("btn-save-strategy").addEventListener("click", async () => {
 });
 
 refresh();
-loadStrategy();
 setInterval(refresh, 3000);
 </script>
 </body>
