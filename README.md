@@ -196,11 +196,11 @@ no confirmation step:
 
 1. Every `POLYBOT_SMART_WALLET_REFRESH_MINUTES` (default 6h), it pulls the
    top `POLYBOT_SMART_WALLET_COUNT` wallets from Polymarket's public
-   leaderboard, ranked by PnL over `POLYBOT_SMART_WALLET_PERIOD`
-   (`day`/`week`/`month`), plus anything listed in
-   `POLYBOT_SMART_WALLET_OVERRIDES` (comma-separated addresses you add
-   yourself — useful if you've found specific wallets worth following, or
-   as a fallback if the leaderboard call ever breaks).
+   leaderboard (`lb-api.polymarket.com/profit`), ranked by PnL over
+   `POLYBOT_SMART_WALLET_PERIOD` (`day`/`week`/`month`/`all`), plus anything
+   listed in `POLYBOT_SMART_WALLET_OVERRIDES` (comma-separated addresses you
+   add yourself — useful if you've found specific wallets worth following,
+   or as a fallback if the leaderboard call ever breaks).
 2. Every cycle, it pulls each tracked wallet's recent trade activity and
    keeps the latest BUY per token within `POLYBOT_SMART_WALLET_LOOKBACK_MINUTES`.
 3. A momentum candidate only survives if a tracked wallet bought that exact
@@ -215,20 +215,17 @@ market makers with no directional view at all. Requiring momentum *and* a
 tracked wallet buying the same outcome cuts down on both false-positive
 types, at the cost of fewer trades.
 
-> **Verify before relying on this.** `data-api.polymarket.com`'s
-> leaderboard/activity endpoints and field names were not reachable from
-> the sandbox this was built in (see the network note above), so
-> `get_leaderboard`/`get_wallet_activity` in `polybot/api/data_api.py` are
-> based on `polymarket-cli`'s documented `data leaderboard`/`data activity`
-> commands rather than a live-verified response shape. Parsing is
-> defensive (it tries several likely field names and skips what it can't
-> parse) and logs the real field names it sees the first time it gets a
-> response (`data-api leaderboard sample fields: [...]` in the log) — check
-> that log line against `_WALLET_KEYS`/`_TOKEN_KEYS`/etc. at the top of
-> `data_api.py` after your first run, and adjust if they don't match.
-> Until you've confirmed it's actually returning wallets, leave this off
-> (`POLYBOT_SIGNAL_FILTER=none` is the default) so it can't silently zero
-> out every trade.
+> Endpoints and field names are confirmed against live calls: the
+> leaderboard lives on a separate host, `lb-api.polymarket.com` (paths
+> `/profit` and `/volume`, not a single endpoint with an `orderBy` param
+> as first guessed), and `data-api.polymarket.com/activity` returns
+> `proxyWallet`/`asset`/`side`/`usdcSize`/`timestamp` — filtered
+> server-side to `type=TRADE` to skip REDEEM/MERGE/SPLIT noise. Parsing in
+> `polybot/api/data_api.py` still tries a couple of fallback field names
+> defensively and logs the real ones it sees the first time
+> (`data-api leaderboard sample fields: [...]`) in case Polymarket ever
+> renames something. Still off by default (`POLYBOT_SIGNAL_FILTER=none`)
+> since it's a stricter, lower-throughput mode you opt into.
 
 ## Going live
 

@@ -24,11 +24,10 @@ def _first_present(entry: dict, keys: tuple[str, ...]):
 
 
 def _log_sample_keys_once(kind: str, entry: dict) -> None:
-    """One-time diagnostic: the exact field names data-api.polymarket.com
-    returns were not verified against a live call while building this (the
-    sandbox this was developed in had no outbound access to polymarket.com).
-    If wallet/token/side parsing below silently drops everything, this line
-    in the log shows you the real keys to fix _WALLET_KEYS/_TOKEN_KEYS/etc.
+    """One-time diagnostic in case Polymarket ever renames these fields:
+    if wallet/token/side parsing below starts silently dropping everything,
+    this line in the log shows the real keys to fix
+    _WALLET_KEYS/_TOKEN_KEYS/etc against.
     """
     if _logged_sample_keys.get(kind):
         return
@@ -36,19 +35,22 @@ def _log_sample_keys_once(kind: str, entry: dict) -> None:
     logger.info("data-api %s sample fields: %s", kind, sorted(entry.keys()))
 
 
+_LEADERBOARD_PATHS = {"pnl": "profit", "volume": "volume"}
+
+
 def get_leaderboard(
     settings: Settings, period: str, order_by: str, limit: int
 ) -> list[dict]:
-    """Top wallets by pnl or volume over `period` (e.g. 'day'/'week'/'month').
+    """Top wallets by pnl or volume over `period` ('day'/'week'/'month'/'all').
 
-    NOTE: endpoint path/params are based on polymarket-cli's documented
-    `data leaderboard --period --order-by` command, not a live-verified call
-    -- see README's "Smart-money confirmation filter" section before relying
-    on this in production.
+    Lives on a separate host (lb-api.polymarket.com, not data-api.polymarket.com)
+    with one path per ranking (/profit, /volume) rather than a single
+    endpoint with an orderBy param -- confirmed via a live call.
     """
-    url = f"{settings.data_api_url}/leaderboard"
+    path = _LEADERBOARD_PATHS.get(order_by, "profit")
+    url = f"{settings.leaderboard_api_url}/{path}"
     try:
-        raw = get_json(url, params={"period": period, "orderBy": order_by, "limit": limit})
+        raw = get_json(url, params={"period": period, "limit": limit})
     except RuntimeError:
         logger.warning("failed to fetch leaderboard (period=%s, order_by=%s)", period, order_by)
         return []
@@ -69,11 +71,14 @@ def get_wallet_activity(settings: Settings, wallet: str, limit: int) -> list[dic
     """Recent on-chain trade activity for a wallet, normalized to
     {side, token_id, usd_size, timestamp} (timestamp = unix seconds).
 
-    Same live-verification caveat as get_leaderboard applies.
+    `type=TRADE` filters out non-trade activity (REDEEM/MERGE/SPLIT/etc,
+    which come back with empty side/asset fields) server-side. Endpoint,
+    params, and field names (proxyWallet/asset/side/usdcSize/timestamp)
+    confirmed via a live call.
     """
     url = f"{settings.data_api_url}/activity"
     try:
-        raw = get_json(url, params={"user": wallet, "limit": limit})
+        raw = get_json(url, params={"user": wallet, "limit": limit, "type": "TRADE"})
     except RuntimeError:
         logger.warning("failed to fetch activity for wallet %s", wallet)
         return []

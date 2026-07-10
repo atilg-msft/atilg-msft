@@ -32,6 +32,29 @@ def test_get_leaderboard_returns_empty_on_failure(tmp_path, monkeypatch):
     assert data_api.get_leaderboard(make_settings(tmp_path), "month", "pnl", 10) == []
 
 
+def test_get_leaderboard_uses_profit_path_for_pnl(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "polybot.api.data_api.get_json",
+        lambda url, params: (calls.append((url, params)), [])[1],
+    )
+    data_api.get_leaderboard(make_settings(tmp_path), period="month", order_by="pnl", limit=10)
+    url, params = calls[0]
+    assert url == "https://lb-api.polymarket.com/profit"
+    assert params == {"period": "month", "limit": 10}
+
+
+def test_get_leaderboard_uses_volume_path_for_volume(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "polybot.api.data_api.get_json",
+        lambda url, params: (calls.append((url, params)), [])[1],
+    )
+    data_api.get_leaderboard(make_settings(tmp_path), period="week", order_by="volume", limit=5)
+    url, params = calls[0]
+    assert url == "https://lb-api.polymarket.com/volume"
+
+
 def test_get_wallet_activity_normalizes_fields(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "polybot.api.data_api.get_json",
@@ -46,3 +69,15 @@ def test_get_wallet_activity_normalizes_fields(tmp_path, monkeypatch):
         {"side": "BUY", "token_id": "tok-1", "usd_size": 42.5, "timestamp": 1000.0},
         {"side": "SELL", "token_id": "tok-2", "usd_size": 10.0, "timestamp": 2000.0},
     ]
+
+
+def test_get_wallet_activity_filters_to_trade_type(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "polybot.api.data_api.get_json",
+        lambda url, params: (calls.append((url, params)), [])[1],
+    )
+    data_api.get_wallet_activity(make_settings(tmp_path), "0xabc", limit=20)
+    url, params = calls[0]
+    assert url == "https://data-api.polymarket.com/activity"
+    assert params == {"user": "0xabc", "limit": 20, "type": "TRADE"}

@@ -58,6 +58,11 @@ class Settings:
             "POLYBOT_DATA_API_URL", "https://data-api.polymarket.com"
         )
     )
+    leaderboard_api_url: str = field(
+        default_factory=lambda: os.environ.get(
+            "POLYBOT_LEADERBOARD_API_URL", "https://lb-api.polymarket.com"
+        )
+    )
     chain_id: int = field(default_factory=lambda: _env_int("POLYBOT_CHAIN_ID", 137))
 
     # Market scanning / filters
