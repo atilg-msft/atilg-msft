@@ -6,8 +6,8 @@ param location string = resourceGroup().location
 @maxLength(11)
 param namePrefix string = 'polybot'
 
-@description('Container image tag to deploy, e.g. "v1" or "latest".')
-param imageTag string = 'latest'
+@description('Full container image reference to deploy. Defaults to a public placeholder so the first deploy succeeds before anything has been pushed to ACR; point this at the ACR image (or let deploy.sh/the workflow do it via `az containerapp update`) once it exists.')
+param containerImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
 @description('paper = simulated fills only. live = real orders with real funds.')
 @allowed(['paper', 'live'])
@@ -144,44 +144,13 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' =
   }
 }
 
-var seedSettings = {
-  POLYBOT_POLL_INTERVAL_SECONDS: '60'
-  POLYBOT_MAX_MARKETS_SCANNED: '200'
-  POLYBOT_MIN_VOLUME_24H: '1000'
-  POLYBOT_MIN_LIQUIDITY: '500'
-  POLYBOT_MIN_PRICE: '0.05'
-  POLYBOT_MAX_PRICE: '0.95'
-  POLYBOT_LOOKBACK_MINUTES: '15'
-  POLYBOT_MOMENTUM_THRESHOLD: '0.08'
-  POLYBOT_TAKE_PROFIT_PCT: '0.15'
-  POLYBOT_STOP_LOSS_PCT: '0.10'
-  POLYBOT_MAX_HOLDING_MINUTES: '240'
-  POLYBOT_COOLDOWN_MINUTES: '30'
-  POLYBOT_MAX_CONCURRENT_POSITIONS: '8'
-  POLYBOT_MAX_POSITION_USD: '50'
-  POLYBOT_POSITION_PCT_OF_EQUITY: '0.02'
-  POLYBOT_MAX_TOTAL_EXPOSURE_PCT: '0.6'
-  POLYBOT_STARTING_CASH: '1000'
-  POLYBOT_SLIPPAGE_BPS: '50'
-  POLYBOT_FEE_BPS: '0'
-  POLYBOT_STRATEGY: 'momentum'
-  POLYBOT_SIGNAL_FILTER: 'none'
-  POLYBOT_SMART_WALLET_COUNT: '30'
-  POLYBOT_SMART_WALLET_PERIOD: 'month'
-  POLYBOT_SMART_WALLET_REFRESH_MINUTES: '360'
-  POLYBOT_SMART_WALLET_LOOKBACK_MINUTES: '30'
-  POLYBOT_SMART_WALLET_OVERRIDES: ''
-}
-
-resource appConfigSeed 'Microsoft.AppConfiguration/configurationStores/keyValues@2023-03-01' = [
-  for key in items(seedSettings): {
-    parent: appConfig
-    name: empty(appConfigLabel) ? key.key : '${key.key}$${appConfigLabel}'
-    properties: {
-      value: key.value
-    }
-  }
-]
+// Strategy/risk/scan key-values are seeded post-deploy (deploy.sh / the
+// GitHub Actions workflow) via `az appconfig kv set --auth-mode login`, not
+// as native Bicep child resources here: ARM's own key-value write path uses
+// the store's local-auth access keys, which fails once disableLocalAuth is
+// true above ("Conflict: ... local authentication is disabled"). The
+// az CLI's --auth-mode login instead authenticates as the deploying
+// principal over AAD/RBAC, which works either way.
 
 // ---------------------------------------------------------------------------
 // Container App (the bot + its FastAPI control panel, single replica)
@@ -219,7 +188,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
       containers: [
         {
           name: 'polybot'
-          image: '${acr.properties.loginServer}/polybot:${imageTag}'
+          image: containerImage
           resources: {
             cpu: json('0.5')
             memory: '1Gi'

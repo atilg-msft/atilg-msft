@@ -25,8 +25,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 echo "==> Ensuring resource group $RESOURCE_GROUP exists in $LOCATION"
 az group create --name "$RESOURCE_GROUP" --location "$LOCATION" --output none
 
-echo "==> Deploying infrastructure (Bicep) -- first pass creates ACR/Key Vault/App Config/storage"
-echo "    The container app's first revision will fail to pull an image yet; that's expected."
+echo "==> Deploying infrastructure (Bicep) -- ACR/Key Vault/App Config/storage/Container App"
+echo "    The Container App starts on a public placeholder image until the real one is built below."
 DEPLOY_OUTPUT=$(az deployment group create \
   --resource-group "$RESOURCE_GROUP" \
   --template-file "$SCRIPT_DIR/main.bicep" \
@@ -35,7 +35,51 @@ DEPLOY_OUTPUT=$(az deployment group create \
 
 ACR_LOGIN_SERVER=$(echo "$DEPLOY_OUTPUT" | python3 -c "import json,sys; print(json.load(sys.stdin)['acrLoginServer']['value'])")
 ACR_NAME="${ACR_LOGIN_SERVER%%.*}"
+APP_CONFIG_NAME=$(echo "$DEPLOY_OUTPUT" | python3 -c "import json,sys; print(json.load(sys.stdin)['appConfigName']['value'])")
 CONTAINER_APP_NAME="${NAME_PREFIX}-app"
+
+echo "==> Seeding App Configuration with default strategy/risk/scan parameters"
+# Uses the deploying user's own AAD login (--auth-mode login), not a local
+# access key, since the store has disableLocalAuth=true.
+SEED_SETTINGS=(
+  "POLYBOT_POLL_INTERVAL_SECONDS=60"
+  "POLYBOT_MAX_MARKETS_SCANNED=200"
+  "POLYBOT_MIN_VOLUME_24H=1000"
+  "POLYBOT_MIN_LIQUIDITY=500"
+  "POLYBOT_MIN_PRICE=0.05"
+  "POLYBOT_MAX_PRICE=0.95"
+  "POLYBOT_LOOKBACK_MINUTES=15"
+  "POLYBOT_MOMENTUM_THRESHOLD=0.08"
+  "POLYBOT_TAKE_PROFIT_PCT=0.15"
+  "POLYBOT_STOP_LOSS_PCT=0.10"
+  "POLYBOT_MAX_HOLDING_MINUTES=240"
+  "POLYBOT_COOLDOWN_MINUTES=30"
+  "POLYBOT_MAX_CONCURRENT_POSITIONS=8"
+  "POLYBOT_MAX_POSITION_USD=50"
+  "POLYBOT_POSITION_PCT_OF_EQUITY=0.02"
+  "POLYBOT_MAX_TOTAL_EXPOSURE_PCT=0.6"
+  "POLYBOT_STARTING_CASH=1000"
+  "POLYBOT_SLIPPAGE_BPS=50"
+  "POLYBOT_FEE_BPS=0"
+  "POLYBOT_STRATEGY=momentum"
+  "POLYBOT_SIGNAL_FILTER=none"
+  "POLYBOT_SMART_WALLET_COUNT=30"
+  "POLYBOT_SMART_WALLET_PERIOD=month"
+  "POLYBOT_SMART_WALLET_REFRESH_MINUTES=360"
+  "POLYBOT_SMART_WALLET_LOOKBACK_MINUTES=30"
+  "POLYBOT_SMART_WALLET_OVERRIDES="
+)
+for entry in "${SEED_SETTINGS[@]}"; do
+  key="${entry%%=*}"
+  value="${entry#*=}"
+  az appconfig kv set \
+    --name "$APP_CONFIG_NAME" \
+    --key "$key" \
+    --value "$value" \
+    --auth-mode login \
+    --yes \
+    --output none
+done
 
 echo "==> Building and pushing the image remotely via ACR Tasks (no local Docker needed)"
 az acr build \
