@@ -188,8 +188,46 @@ class Portfolio:
         return cls(cash=starting_cash)
 
 
+def _migrate_trade_log_if_needed(path: Path) -> None:
+    """Bring an existing trades.csv up to the current TRADE_LOG_FIELDS.
+
+    Columns added to TRADE_LOG_FIELDS after a file already existed (e.g.
+    entry_reason/exit_reason_detail) don't retroactively appear in that
+    file's header row, but new rows are still written with the extra
+    values -- csv.DictWriter writes whatever fieldnames it's given
+    regardless of what the file's own header says. Reading such a file
+    back with DictReader then dumps the un-headed extra values into a
+    `None`-keyed overflow list (its `restkey`) instead of the right column.
+    Rewriting the file once, recovering that overflow into the columns it
+    was always meant to be, is simpler and safer than trying to keep every
+    historical header variant readable forever.
+    """
+    with path.open(newline="") as f:
+        reader = csv.DictReader(f)
+        original_fieldnames = reader.fieldnames or []
+        if original_fieldnames == TRADE_LOG_FIELDS:
+            return
+        rows = list(reader)
+
+    missing_columns = [c for c in TRADE_LOG_FIELDS if c not in original_fieldnames]
+    migrated_rows = []
+    for row in rows:
+        overflow = row.pop(None, None) or []
+        for column, value in zip(missing_columns, overflow):
+            row[column] = value
+        migrated_rows.append({column: row.get(column, "") for column in TRADE_LOG_FIELDS})
+
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=TRADE_LOG_FIELDS)
+        writer.writeheader()
+        writer.writerows(migrated_rows)
+    logger.info("migrated %s to current trade-log schema (%d rows)", path, len(migrated_rows))
+
+
 def _append_trade_row(path: Path, row: dict) -> None:
     is_new = not path.exists()
+    if not is_new:
+        _migrate_trade_log_if_needed(path)
     with path.open("a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=TRADE_LOG_FIELDS)
         if is_new:

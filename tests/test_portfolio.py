@@ -1,4 +1,4 @@
-from polybot.portfolio import Portfolio, read_recent_trades, utcnow
+from polybot.portfolio import TRADE_LOG_FIELDS, Portfolio, read_recent_trades, utcnow
 
 
 def test_open_and_close_position_roundtrip(tmp_path):
@@ -74,6 +74,60 @@ def test_read_recent_trades_most_recent_first(tmp_path):
 
     trades = read_recent_trades(trade_log_path)
     assert [t["market_question"] for t in trades] == ["Q1", "Q0"]
+
+
+def test_appending_migrates_a_file_written_with_an_older_schema(tmp_path):
+    """Simulates trades.csv from before entry_reason/exit_reason_detail
+    existed: an older header, but a data row that (like production, once
+    the code moved on) already carries the newer columns' values past the
+    end of what the header names -- exactly what csv.DictWriter produces
+    when you keep writing to a file whose header predates a fieldname
+    change. Appending a new trade should heal the whole file in place."""
+    trade_log_path = tmp_path / "trades.csv"
+    old_header = [c for c in TRADE_LOG_FIELDS if c not in ("entry_reason", "exit_reason_detail")]
+    old_row = [
+        "2026-01-01T00:00:00+00:00", "2025-12-31T00:00:00+00:00", "tok-old",
+        "0xold", "Old market?", "Yes", "0.4", "0.5", "50", "20.0", "25.0", "5.0",
+        "0.25", "take_profit", "Old entry reason", "Old exit detail",
+    ]
+    with trade_log_path.open("w", newline="") as f:
+        f.write(",".join(old_header) + "\n")
+        f.write(",".join(old_row) + "\n")
+
+    portfolio = Portfolio(cash=1000)
+    now = utcnow()
+    portfolio.open_position(
+        token_id="tok-new",
+        condition_id="0xnew",
+        market_question="New market?",
+        outcome="Yes",
+        fill_price=0.4,
+        cost_usd=10.0,
+        opened_at=now,
+        entry_reason="New entry reason",
+    )
+    portfolio.close_position(
+        token_id="tok-new",
+        exit_price=0.45,
+        closed_at=now,
+        reason="take_profit",
+        cooldown_minutes=1,
+        trade_log_path=trade_log_path,
+        exit_reason_detail="New exit detail",
+    )
+
+    trades = read_recent_trades(trade_log_path)
+    assert len(trades) == 2
+    assert trades[0]["token_id"] == "tok-new"
+    assert trades[0]["entry_reason"] == "New entry reason"
+    assert trades[0]["exit_reason_detail"] == "New exit detail"
+    # The old row's overflow values were recovered into the right columns,
+    # not dropped or left keyed under None.
+    assert trades[1]["token_id"] == "tok-old"
+    assert trades[1]["entry_reason"] == "Old entry reason"
+    assert trades[1]["exit_reason_detail"] == "Old exit detail"
+    assert None not in trades[1]
+    assert trade_log_path.read_text().splitlines()[0] == ",".join(TRADE_LOG_FIELDS)
 
 
 def test_json_roundtrip(tmp_path):
