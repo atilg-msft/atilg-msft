@@ -93,3 +93,36 @@ def test_trades_endpoint_reflects_closed_positions(tmp_path, monkeypatch):
         assert "control panel" in trades[0]["exit_reason_detail"]
     finally:
         service.stop()
+
+
+def test_close_position_endpoint(tmp_path, monkeypatch):
+    monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    settings = Settings(data_dir=tmp_path, poll_interval_seconds=1)
+    service = BotService(settings)
+    client = TestClient(create_app(service))
+
+    try:
+        from polybot.portfolio import utcnow
+
+        service.portfolio.open_position(
+            token_id="tok-yes",
+            condition_id="0xabc",
+            market_question="Will it happen?",
+            outcome="Yes",
+            fill_price=0.40,
+            cost_usd=20.0,
+            opened_at=utcnow(),
+        )
+
+        resp = client.post("/api/positions/tok-yes/close")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["token_id"] == "tok-yes"
+        assert body["status"]["open_positions"] == []
+
+        resp = client.post("/api/positions/tok-yes/close")
+        assert resp.status_code == 404
+    finally:
+        service.stop()

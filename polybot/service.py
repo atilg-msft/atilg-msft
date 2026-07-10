@@ -206,12 +206,44 @@ class BotService:
                 closed.append({"token_id": token_id, "exit_price": fill_price, "pnl_usd": pnl})
                 self.last_mark_prices.pop(token_id, None)
             self.portfolio.save(self.portfolio_path)
-            self.last_equity = self.portfolio.equity({})
+            self.last_equity = self.portfolio.equity(self.last_mark_prices)
             self.state = BotState.STOPPED
             self._save_desired_state(BotState.STOPPED)
 
         logger.warning("liquidation complete: closed %d position(s)", len(closed))
         return {"closed_positions": closed, "cash": self.portfolio.cash}
+
+    def close_position(self, token_id: str) -> dict:
+        """Force-close a single open position at market. Unlike `liquidate()`,
+        this leaves every other position and the loop's running/stopped
+        state untouched -- for stepping in on one position you disagree
+        with, not an emergency stop.
+        """
+        with self.lock:
+            position = self.portfolio.positions.get(token_id)
+            if position is None:
+                raise KeyError(f"no open position for token_id={token_id!r}")
+
+            fill_price = self.executor.sell(token_id, position.size_tokens, position.entry_price)
+            if fill_price is None:
+                raise RuntimeError(f"sell failed for token_id={token_id!r}")
+
+            now = utcnow()
+            pnl = self.portfolio.close_position(
+                token_id,
+                fill_price,
+                now,
+                "manual_close",
+                self.settings.cooldown_minutes,
+                self.trade_log_path,
+                exit_reason_detail="Requested from the control panel (single position)",
+            )
+            self.last_mark_prices.pop(token_id, None)
+            self.portfolio.save(self.portfolio_path)
+            self.last_equity = self.portfolio.equity(self.last_mark_prices)
+
+        logger.warning("manual close: %s exit=%.4f pnl=$%.2f", token_id, fill_price, pnl)
+        return {"token_id": token_id, "exit_price": fill_price, "pnl_usd": pnl}
 
     def _position_view(self, position) -> dict:
         d = asdict(position)

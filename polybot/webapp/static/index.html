@@ -49,6 +49,7 @@
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+  button.small { font-size: 0.78rem; font-weight: 600; padding: 0.3rem 0.6rem; border-radius: 6px; }
   select {
     font-size: 0.95rem; padding: 0.5rem 0.7rem; border-radius: 8px;
     border: 1px solid var(--border); background: var(--bg); color: var(--fg); min-width: 200px;
@@ -131,7 +132,7 @@
     <strong>Açık Pozisyonlar</strong>
     <table id="positions-table">
       <thead>
-        <tr><th>Market</th><th>Outcome</th><th>Giriş</th><th>Güncel</th><th>Adet</th><th>Maliyet</th><th>Güncel Değer</th><th>Anlık K/Z</th><th>Açılış</th><th>Neden</th></tr>
+        <tr><th>Market</th><th>Outcome</th><th>Giriş</th><th>Güncel</th><th>Adet</th><th>Maliyet</th><th>Güncel Değer</th><th>Anlık K/Z</th><th>Açılış</th><th>Neden</th><th></th></tr>
       </thead>
       <tbody id="positions-body"></tbody>
     </table>
@@ -198,7 +199,8 @@ function renderStatus(s) {
       `<td>${fmtUsd(p.current_value_usd)}</td>` +
       `<td class="${pnlClass}">${fmtUsd(pnl)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%)</td>` +
       `<td>${new Date(p.opened_at).toLocaleString()}</td>` +
-      `<td class="reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</td>`;
+      `<td class="reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</td>` +
+      `<td><button class="small danger" data-close-token="${escapeHtml(p.token_id)}">Kapat</button></td>`;
     body.appendChild(tr);
   }
   $("positions-empty").style.display = s.open_positions.length ? "none" : "block";
@@ -272,6 +274,21 @@ $("btn-liquidate").addEventListener("click", async () => {
     await api("/api/liquidate", { method: "POST" });
   } finally {
     $("btn-liquidate").disabled = false;
+    refresh();
+  }
+});
+
+$("positions-body").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-close-token]");
+  if (!btn) return;
+  const tokenId = btn.getAttribute("data-close-token");
+  if (!confirm("Bu pozisyon piyasa fiyatından kapatılacak. Emin misiniz?")) return;
+  btn.disabled = true;
+  try {
+    await api(`/api/positions/${encodeURIComponent(tokenId)}/close`, { method: "POST" });
+  } catch (e) {
+    alert("Kapatılamadı: " + e.message);
+  } finally {
     refresh();
   }
 });

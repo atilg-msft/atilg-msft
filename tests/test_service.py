@@ -77,6 +77,60 @@ def test_status_includes_current_value_for_open_positions(tmp_path, monkeypatch)
         service.stop()
 
 
+def test_close_position_closes_only_the_requested_one(tmp_path, monkeypatch):
+    monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    service = BotService(make_settings(tmp_path))
+    from polybot.portfolio import utcnow
+
+    service.portfolio.open_position(
+        token_id="tok-yes",
+        condition_id="0xabc",
+        market_question="Will it happen?",
+        outcome="Yes",
+        fill_price=0.40,
+        cost_usd=20.0,
+        opened_at=utcnow(),
+    )
+    service.portfolio.open_position(
+        token_id="tok-no",
+        condition_id="0xdef",
+        market_question="Will it not happen?",
+        outcome="No",
+        fill_price=0.60,
+        cost_usd=20.0,
+        opened_at=utcnow(),
+    )
+
+    service.start()  # closing one position shouldn't stop the loop
+    try:
+        result = service.close_position("tok-yes")
+
+        assert result["token_id"] == "tok-yes"
+        assert "tok-yes" not in service.portfolio.positions
+        assert "tok-no" in service.portfolio.positions  # untouched
+        assert service.status()["state"] == "running"  # unaffected by the close
+        assert "manual_close" in (tmp_path / "trades.csv").read_text()
+    finally:
+        service.stop()
+
+
+def test_close_position_raises_for_unknown_token(tmp_path, monkeypatch):
+    monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    service = BotService(make_settings(tmp_path))
+    try:
+        try:
+            service.close_position("no-such-token")
+            assert False, "expected KeyError"
+        except KeyError:
+            pass
+    finally:
+        service.stop()
+
+
 def test_liquidate_closes_all_open_positions(tmp_path, monkeypatch):
     monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
     monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)

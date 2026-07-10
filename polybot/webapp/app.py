@@ -61,6 +61,17 @@ def create_app(service: BotService) -> FastAPI:
         result = service.liquidate()
         return {**result, "status": service.status()}
 
+    @app.post("/api/positions/{token_id}/close")
+    def close_position(token_id: str):
+        logger.warning("manual close requested via API for token %s", token_id)
+        try:
+            result = service.close_position(token_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {**result, "status": service.status()}
+
     @app.get("/")
     def index():
         return FileResponse(STATIC_DIR / "index.html")

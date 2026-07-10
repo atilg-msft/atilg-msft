@@ -128,7 +128,8 @@ see [Deploying to Azure](#deploying-to-azure).
 | **Başlat** — `POST /api/start` | Starts the loop if it isn't already running. |
 | **Durdur** — `POST /api/stop` | Stops opening new positions after the current cycle finishes. Existing open positions are left alone (still monitored for take-profit/stop-loss if you start it again). |
 | **Likidasyona Dön** — `POST /api/liquidate` | Emergency flatten: sells every open position at the current market price immediately, then stops the loop. Doesn't resume trading afterward — that's a deliberate choice, since auto-reopening right after a manual flatten is rarely what you want. |
-| `GET /api/status` | Current state, mode, cash, equity, realized P&L, exposure, open positions, last cycle time, last error. Polled by the page every 3s. |
+| **Kapat** (per row) — `POST /api/positions/{token_id}/close` | Force-closes just that one position at market. Unlike Likidasyona Dön, every other position and the run/stop state are untouched — for stepping in on a single position you disagree with, not an emergency stop. 404s if that position is no longer open. |
+| `GET /api/status` | Current state, mode, cash, equity, realized P&L, exposure, open positions (with entry *and* current price/value/unrealized P&L per position), last cycle time, last error. Polled by the page every 3s. |
 
 The desired run state (`running`/`stopped`) is persisted to
 `data/control_state.json`, so a container restart resumes whatever you last
