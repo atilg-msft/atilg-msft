@@ -4,7 +4,7 @@ import logging
 import os
 
 from .cloud.appconfig import AppConfigSettingsProvider
-from .cloud.keyvault import load_secrets_from_key_vault
+from .cloud.keyvault import KeyVaultSecretsProvider
 from .config import load_settings
 from .logging_conf import setup_logging
 from .service import BotService
@@ -14,8 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 def build_service() -> BotService:
-    # Key Vault secrets first, so the initial Settings() build already has them.
-    load_secrets_from_key_vault(os.environ.get("AZURE_KEY_VAULT_URL"))
+    keyvault_provider = KeyVaultSecretsProvider(
+        vault_url=os.environ.get("AZURE_KEY_VAULT_URL"),
+        refresh_seconds=int(os.environ.get("AZURE_KEY_VAULT_REFRESH_SECONDS", "300")),
+    )
+    # Force a first fetch so the initial Settings() build already has them,
+    # regardless of the refresh interval above.
+    keyvault_provider.refresh(force=True)
     settings = load_settings()
     setup_logging(settings.data_dir)
 
@@ -23,12 +28,16 @@ def build_service() -> BotService:
     if settings.mode == "live":
         logger.warning("LIVE MODE: real orders, real funds.")
 
-    provider = AppConfigSettingsProvider(
+    appconfig_provider = AppConfigSettingsProvider(
         endpoint=os.environ.get("AZURE_APPCONFIG_ENDPOINT"),
         label=os.environ.get("AZURE_APPCONFIG_LABEL") or None,
         refresh_seconds=int(os.environ.get("AZURE_APPCONFIG_REFRESH_SECONDS", "300")),
     )
-    return BotService(settings, settings_provider=provider.get_settings)
+    return BotService(
+        settings,
+        settings_provider=appconfig_provider.get_settings,
+        keyvault_provider=keyvault_provider,
+    )
 
 
 def main() -> None:

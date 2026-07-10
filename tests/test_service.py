@@ -254,3 +254,91 @@ def test_strategy_override_survives_restart(tmp_path, monkeypatch):
         assert service2.get_strategy_info()["overridden"] is True
     finally:
         service2.stop()
+
+
+def test_executor_rebuilds_when_mode_flips_to_live(tmp_path, monkeypatch):
+    monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    calls = []
+
+    def fake_get_executor(settings):
+        calls.append(settings.mode)
+        return f"executor-for-{settings.mode}"
+
+    monkeypatch.setattr("polybot.service.get_executor", fake_get_executor)
+
+    settings = make_settings(tmp_path, mode="paper")
+    service = BotService(settings)
+    assert calls == ["paper"]
+    assert service.executor == "executor-for-paper"
+
+    live_settings = make_settings(tmp_path, mode="live", private_key="0xabc")
+    service.settings_provider = lambda: live_settings
+
+    service.start()
+    try:
+        deadline = time.monotonic() + 5
+        while len(calls) < 2 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert calls == ["paper", "live"]
+        assert service.executor == "executor-for-live"
+        assert service.settings.mode == "live"
+    finally:
+        service.stop()
+
+
+def test_executor_rebuild_failure_rolls_back_settings_too(tmp_path, monkeypatch):
+    monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    def fake_get_executor(settings):
+        if settings.mode == "live":
+            raise RuntimeError("bad credentials")
+        return "paper-executor"
+
+    monkeypatch.setattr("polybot.service.get_executor", fake_get_executor)
+
+    settings = make_settings(tmp_path, mode="paper")
+    service = BotService(settings)
+    assert service.executor == "paper-executor"
+
+    live_settings = make_settings(tmp_path, mode="live", private_key="0xabc")
+    service.settings_provider = lambda: live_settings
+
+    service.start()
+    try:
+        deadline = time.monotonic() + 5
+        while service.last_cycle_at is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        # The executor swap failed, so both settings and executor must have
+        # been rolled back together -- never mode="live" with the old
+        # (paper) executor still in place, or vice versa.
+        assert service.executor == "paper-executor"
+        assert service.settings.mode == "paper"
+        assert service.status()["state"] == "running"  # loop kept going
+    finally:
+        service.stop()
+
+
+def test_keyvault_provider_refreshed_every_cycle(tmp_path, monkeypatch):
+    monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    class FakeKeyVaultProvider:
+        def __init__(self):
+            self.refresh_count = 0
+
+        def refresh(self):
+            self.refresh_count += 1
+
+    keyvault_provider = FakeKeyVaultProvider()
+    service = BotService(make_settings(tmp_path), keyvault_provider=keyvault_provider)
+    service.start()
+    try:
+        deadline = time.monotonic() + 5
+        while keyvault_provider.refresh_count < 1 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert keyvault_provider.refresh_count >= 1
+    finally:
+        service.stop()

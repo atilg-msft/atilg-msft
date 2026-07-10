@@ -77,6 +77,7 @@ seed_appconfig_key() {
 }
 
 SEED_SETTINGS=(
+  "POLYBOT_MODE=${POLYBOT_MODE}"
   "POLYBOT_POLL_INTERVAL_SECONDS=60"
   "POLYBOT_MAX_MARKETS_SCANNED=200"
   "POLYBOT_MIN_VOLUME_24H=1000"
@@ -139,9 +140,10 @@ echo "$DEPLOY_OUTPUT" | python3 -m json.tool
 echo ""
 echo "Next steps:"
 echo "  - Open the control panel at the containerAppUrl above."
-echo "  - For live trading, set Key Vault secrets:"
+echo "  - For live trading, no redeploy needed -- set Key Vault secrets:"
 echo "      az keyvault secret set --vault-name <keyVaultName> --name polybot-private-key --value <0x...>"
 echo "      az keyvault secret set --vault-name <keyVaultName> --name polybot-funder-address --value <0x...>"
-echo "    then redeploy with polybotMode=live (az deployment group create ... -p polybotMode=live)."
+echo "    then flip the mode in App Configuration:"
+echo "      az appconfig kv set --name <appConfigName> --key POLYBOT_MODE --value live --auth-mode login --yes"
 echo "  - Tune strategy parameters any time via:"
 echo "      az appconfig kv set --name <appConfigName> --key POLYBOT_MOMENTUM_THRESHOLD --value 0.1 --auth-mode login --yes"

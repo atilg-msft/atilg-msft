@@ -11,12 +11,16 @@ logger = logging.getLogger(__name__)
 
 DYNAMIC_PREFIX = "POLYBOT_"
 
-# Fields intentionally excluded from App Configuration refresh: they control
-# security/trading-mode posture (real money, private key, wallet type) and
-# should only change via a redeploy, not a config-store edit someone could
-# make without realizing it flips paper trading to live.
+# Fields intentionally excluded from App Configuration refresh. Credentials
+# (private key/funder address/signature type) are excluded here because
+# they're sourced from Key Vault instead (see cloud/keyvault.py's
+# KeyVaultSecretsProvider) -- App Configuration never sees their values.
+# POLYBOT_MODE is deliberately *not* excluded: it's meant to flip
+# paper<->live from App Configuration without a redeploy (see
+# BotService._loop()'s executor-rebuild logic, and note in the README that
+# App Configuration write access is therefore the real access-control
+# boundary for going live, not a deploy gate).
 STATIC_KEYS = {
-    "POLYBOT_MODE",
     "POLYBOT_DATA_DIR",
     "POLYBOT_PRIVATE_KEY",
     "POLYBOT_SIGNATURE_TYPE",

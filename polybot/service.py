@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Callable
 
 from .bot import run_cycle
+from .cloud.keyvault import KeyVaultSecretsProvider
 from .config import SIGNAL_FILTER_CHOICES, STRATEGY_CHOICES, Settings
 from .execution.factory import get_executor
 from .portfolio import Portfolio, read_recent_trades, utcnow
@@ -45,9 +46,11 @@ class BotService:
         self,
         settings: Settings,
         settings_provider: Callable[[], Settings] | None = None,
+        keyvault_provider: KeyVaultSecretsProvider | None = None,
     ) -> None:
         self.settings = settings
         self.settings_provider = settings_provider
+        self.keyvault_provider = keyvault_provider
 
         self.portfolio_path = settings.data_dir / "portfolio.json"
         self.trade_log_path = settings.data_dir / "trades.csv"
@@ -279,16 +282,55 @@ class BotService:
 
     # -- background loop ------------------------------------------------------
 
+    def _apply_settings(self, refreshed: Settings) -> None:
+        """Swap in refreshed settings, rebuilding the executor first if the
+        mode or live credentials changed (POLYBOT_MODE is refreshable from
+        App Configuration; private_key/signature_type/funder_address from
+        Key Vault -- see cloud/appconfig.py's STATIC_KEYS and
+        cloud/keyvault.py). Must be called under self.lock.
+
+        Rebuilding an executor can fail (mode flipped to live before a
+        private key exists in Key Vault yet, a bad key, a network blip
+        authenticating with the CLOB). If it does, the whole refresh is
+        rolled back -- self.settings and self.executor must never disagree
+        about which mode is really running, so a failed swap keeps both
+        exactly as they were and retries on the next cycle.
+        """
+        credentials_changed = refreshed.mode == "live" and (
+            refreshed.private_key != self.settings.private_key
+            or refreshed.signature_type != self.settings.signature_type
+            or refreshed.funder_address != self.settings.funder_address
+        )
+        if refreshed.mode != self.settings.mode or credentials_changed:
+            try:
+                new_executor = get_executor(refreshed)
+            except Exception:
+                logger.exception(
+                    "failed to switch executor for mode=%s; keeping previous settings/executor (mode=%s)",
+                    refreshed.mode,
+                    self.settings.mode,
+                )
+                return
+            self.executor = new_executor
+            if refreshed.mode != self.settings.mode:
+                logger.warning("mode changed %s -> %s; executor switched", self.settings.mode, refreshed.mode)
+            else:
+                logger.warning("live credentials changed; executor re-authenticated")
+
+        self.settings = refreshed
+        self.risk = RiskManager(refreshed)
+
     def _loop(self) -> None:
         while not self._stop_event.is_set():
             try:
+                if self.keyvault_provider is not None:
+                    self.keyvault_provider.refresh()
                 if self.settings_provider is not None:
                     refreshed = self.settings_provider()
                     with self.lock:
                         if self._manual_overrides:
                             refreshed = replace(refreshed, **self._manual_overrides)
-                        self.settings = refreshed
-                        self.risk = RiskManager(refreshed)
+                        self._apply_settings(refreshed)
                 with self.lock:
                     equity, mark_prices = run_cycle(
                         self.settings,

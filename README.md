@@ -250,22 +250,39 @@ This is real-money automation — review the strategy and risk limits
 yourself before turning it on, and treat the live executor as a starting
 point to test carefully, not a finished product.
 
+On Azure, steps 3's fields don't need a redeploy: set the Key Vault secrets
+(`polybot-private-key`, `polybot-funder-address`, `polybot-signature-type`)
+and flip `POLYBOT_MODE=live` in App Configuration, and the running
+container picks both up on its next refresh (≤5 minutes, both
+independently configurable via `AZURE_KEY_VAULT_REFRESH_SECONDS` /
+`AZURE_APPCONFIG_REFRESH_SECONDS`). If the credentials aren't valid yet
+when `POLYBOT_MODE=live` lands, the bot logs the failure and keeps trading
+on whatever executor it had before — it doesn't crash the loop.
+
 ## Deploying to Azure
 
 The bot ships as a container for **Azure Container Apps**, with:
 
-- **Azure Key Vault** holding the two real secrets (`polybot-private-key`,
-  `polybot-funder-address`), read at startup via the container's managed
-  identity (`polybot/cloud/keyvault.py`, `DefaultAzureCredential` — no
-  connection string or key ever touches the app config).
-- **Azure App Configuration** holding every strategy/risk/scan parameter
-  (momentum threshold, lookback window, position sizing, exit rules, poll
-  interval, ...) as plain `POLYBOT_*` key-values, re-read every 5 minutes
-  by default (`polybot/cloud/appconfig.py`) so you can retune the bot
-  without a redeploy. `POLYBOT_MODE`, `POLYBOT_PRIVATE_KEY`,
-  `POLYBOT_SIGNATURE_TYPE`, `POLYBOT_FUNDER_ADDRESS` and the API endpoints
-  are deliberately excluded from that refresh — flipping paper→live or
-  changing wallets always requires a real deploy, never just a config edit.
+- **Azure Key Vault** holding the credential secrets (`polybot-private-key`,
+  `polybot-funder-address`, `polybot-signature-type`), re-read every 5
+  minutes by default via the container's managed identity
+  (`polybot/cloud/keyvault.py`'s `KeyVaultSecretsProvider`,
+  `DefaultAzureCredential` — no connection string or key ever touches App
+  Configuration). Rotating a wallet or switching signature type is a Key
+  Vault secret update, not a redeploy.
+- **Azure App Configuration** holding every other setting — strategy/risk/scan
+  parameters (momentum threshold, lookback window, position sizing, exit
+  rules, poll interval, ...) *and* `POLYBOT_MODE` (`paper`/`live`) — as
+  plain `POLYBOT_*` key-values, re-read every 5 minutes by default
+  (`polybot/cloud/appconfig.py`) so you can retune the bot, or flip it into
+  live trading, without a redeploy. The API endpoint URLs
+  (`POLYBOT_CLOB_API_URL` etc.) and `POLYBOT_DATA_DIR` are the only things
+  still excluded from that refresh.
+  **Because `POLYBOT_MODE` is dynamic, App Configuration write access
+  (`App Configuration Data Owner`/`Contributor`) is the real access-control
+  boundary for going live** — anyone who can write a key there can turn on
+  real-money trading the moment a private key exists in Key Vault. Scope
+  that role narrowly (see `infra/main.bicep`'s RBAC assignments).
 - A single-replica **Container App** (`minReplicas`/`maxReplicas` pinned to
   1 — the portfolio and control state are in-process/on-disk, not
   horizontally scalable) with an **Azure Files** volume mounted at
@@ -286,15 +303,17 @@ handy since this was developed in a sandbox without Docker access), and
 points the Container App at the freshly built image. It prints the
 control-panel URL, Key Vault name, and App Configuration name at the end.
 
-Then, for live trading:
+Then, for live trading -- no redeploy needed for either step, both take
+effect on their next refresh (≤5 minutes by default):
 
 ```bash
 az keyvault secret set --vault-name <keyVaultName> --name polybot-private-key --value 0x...
 az keyvault secret set --vault-name <keyVaultName> --name polybot-funder-address --value 0x...
-az deployment group create -g polybot-rg -f infra/main.bicep -p polybotMode=live
+# optional, defaults to "proxy": az keyvault secret set --vault-name <keyVaultName> --name polybot-signature-type --value proxy
+az appconfig kv set --name <appConfigName> --key POLYBOT_MODE --value live --auth-mode login --yes
 ```
 
-And to retune the strategy at any time, no redeploy needed:
+And to retune the strategy at any time, also no redeploy needed:
 
 ```bash
 az appconfig kv set --name <appConfigName> --key POLYBOT_MOMENTUM_THRESHOLD --value 0.1 --auth-mode login --yes
