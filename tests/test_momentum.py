@@ -59,6 +59,8 @@ def test_evaluate_generates_signal_above_threshold(tmp_path):
     assert signal.token_id == "tok-yes"
     assert signal.outcome == "Yes"
     assert signal.momentum > settings.momentum_threshold
+    assert "Momentum" in signal.reason
+    assert "threshold" in signal.reason
 
 
 def test_evaluate_rejects_below_threshold(tmp_path):

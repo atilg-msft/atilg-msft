@@ -153,6 +153,30 @@ Configuration** and survives restarts — otherwise a routine App
 Configuration refresh could silently revert an operator's explicit choice
 back to the deployed default, which would be more confusing than useful.
 
+### Why did it do that?
+
+Every open position and every closed trade carries a plain-text rationale,
+visible in the panel (hover a truncated cell for the full text) and in
+`GET /api/trades`:
+
+- **Entries** (`entry_reason`, shown in the **Açık Pozisyonlar** table's
+  **Neden** column): the momentum figure that triggered it — e.g.
+  `Momentum +12.3% over 15min (threshold 8.0%), price 0.512` — with
+  `; confirmed by wallet 0xabc123456… buying $500` appended when the
+  smart-money filter was involved.
+- **Exits** (`reason` + `exit_reason_detail`, shown as a colored badge with
+  the detail on hover in the new **Son İşlemler** table): a short code
+  (`take_profit` / `stop_loss` / `max_holding_time` / `manual_liquidation`)
+  plus the numbers behind it, e.g. `Price 0.4000 -> 0.4700 (+17.5%),
+  threshold +15%` (`polybot/risk.py`'s `describe_exit`).
+
+Both are computed once, at the moment the decision is made
+(`polybot/strategy/momentum.py`, `polybot/scanner.py`,
+`polybot/risk.py`), and stored alongside the trade — in `portfolio.json`
+for open positions and appended to `trades.csv` for closed ones — so the
+explanation always matches the state that was actually used to decide,
+not a value recomputed later from possibly-changed settings.
+
 ## Smart-money confirmation filter
 
 Set `POLYBOT_SIGNAL_FILTER=smart_money` (env var/App Configuration) or pick

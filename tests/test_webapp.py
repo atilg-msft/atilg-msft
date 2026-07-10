@@ -59,3 +59,37 @@ def test_strategy_selection_endpoints(tmp_path, monkeypatch):
         assert resp.status_code == 400
     finally:
         service.stop()
+
+
+def test_trades_endpoint_reflects_closed_positions(tmp_path, monkeypatch):
+    monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    settings = Settings(data_dir=tmp_path, poll_interval_seconds=1)
+    service = BotService(settings)
+    client = TestClient(create_app(service))
+
+    try:
+        assert client.get("/api/trades").json() == []
+
+        from polybot.portfolio import utcnow
+
+        service.portfolio.open_position(
+            token_id="tok-yes",
+            condition_id="0xabc",
+            market_question="Will it happen?",
+            outcome="Yes",
+            fill_price=0.40,
+            cost_usd=20.0,
+            opened_at=utcnow(),
+            entry_reason="Momentum +12.0% over 15min (threshold 8.0%)",
+        )
+        service.liquidate()
+
+        trades = client.get("/api/trades").json()
+        assert len(trades) == 1
+        assert trades[0]["reason"] == "manual_liquidation"
+        assert trades[0]["entry_reason"].startswith("Momentum")
+        assert "control panel" in trades[0]["exit_reason_detail"]
+    finally:
+        service.stop()

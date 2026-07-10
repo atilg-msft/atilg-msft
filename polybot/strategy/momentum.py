@@ -53,6 +53,10 @@ def evaluate(
         if not (settings.min_price <= order_book.best_ask <= settings.max_price):
             return None
 
+    reason = (
+        f"Momentum {momentum:+.1%} over {settings.lookback_minutes}min "
+        f"(threshold {settings.momentum_threshold:.1%}), price {last_price:.3f}"
+    )
     return Signal(
         token_id=token_id,
         condition_id=market.condition_id,
@@ -60,4 +64,5 @@ def evaluate(
         outcome=market.token_outcome(token_id),
         momentum=momentum,
         reference_price=last_price,
+        reason=reason,
     )

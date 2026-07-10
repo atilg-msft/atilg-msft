@@ -39,8 +39,8 @@
   .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin-top: 1rem; }
   .metric .label { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
   .metric .value { font-size: 1.3rem; font-weight: 700; margin-top: 0.15rem; }
-  .value.neg { color: var(--bad); }
-  .value.pos { color: var(--ok); }
+  .value.neg, td.neg { color: var(--bad); }
+  .value.pos, td.pos { color: var(--ok); }
   .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem; }
   button {
     font-size: 0.95rem; font-weight: 600; padding: 0.6rem 1.1rem; border-radius: 8px;
@@ -68,6 +68,17 @@
     border-radius: 8px; padding: 0.75rem 1rem; font-size: 0.85rem; margin-top: 1rem; white-space: pre-wrap;
   }
   .footer-note { color: var(--muted); font-size: 0.78rem; margin-top: 1.5rem; }
+  .reason {
+    color: var(--muted); font-size: 0.82rem; max-width: 260px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; cursor: help;
+  }
+  .reason-badge {
+    display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.78rem;
+    font-weight: 600; border: 1px solid var(--border); white-space: nowrap;
+  }
+  .reason-badge.take_profit { color: var(--ok); border-color: var(--ok); }
+  .reason-badge.stop_loss { color: var(--bad); border-color: var(--bad); }
+  .reason-badge.max_holding_time, .reason-badge.manual_liquidation { color: var(--warn); border-color: var(--warn); }
 </style>
 </head>
 <body>
@@ -120,19 +131,33 @@
     <strong>Açık Pozisyonlar</strong>
     <table id="positions-table">
       <thead>
-        <tr><th>Market</th><th>Outcome</th><th>Giriş</th><th>Adet</th><th>Maliyet</th><th>Açılış</th></tr>
+        <tr><th>Market</th><th>Outcome</th><th>Giriş</th><th>Adet</th><th>Maliyet</th><th>Açılış</th><th>Neden</th></tr>
       </thead>
       <tbody id="positions-body"></tbody>
     </table>
     <div class="empty" id="positions-empty" style="display:none">Açık pozisyon yok.</div>
   </div>
 
-  <p class="footer-note">Durum her 3 saniyede bir yenilenir. "Durdur" yeni pozisyon açmayı durdurur (mevcutlar kalır). "Likidasyona Dön" tüm açık pozisyonları anında kapatır ve botu durdurur.</p>
+  <div class="card">
+    <strong>Son İşlemler</strong>
+    <table id="trades-table">
+      <thead>
+        <tr><th>Market</th><th>Outcome</th><th>K/Z</th><th>Kapanış Nedeni</th><th>Açılış Nedeni</th><th>Kapanış</th></tr>
+      </thead>
+      <tbody id="trades-body"></tbody>
+    </table>
+    <div class="empty" id="trades-empty" style="display:none">Henüz kapatılmış işlem yok.</div>
+  </div>
+
+  <p class="footer-note">Durum her 3 saniyede bir yenilenir. "Durdur" yeni pozisyon açmayı durdurur (mevcutlar kalır). "Likidasyona Dön" tüm açık pozisyonları anında kapatır ve botu durdurur. "Neden" sütunları, o kararın (giriş/çıkış) neden verildiğini gösterir — üzerine gelerek tam metni görebilirsiniz.</p>
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const fmtUsd = (v) => (v === null || v === undefined) ? "-" : "$" + Number(v).toFixed(2);
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+}[c]));
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -163,9 +188,11 @@ function renderStatus(s) {
   body.innerHTML = "";
   for (const p of s.open_positions) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${p.market_question}</td><td>${p.outcome}</td><td>${Number(p.entry_price).toFixed(4)}</td>` +
+    const reason = p.entry_reason || "-";
+    tr.innerHTML = `<td>${escapeHtml(p.market_question)}</td><td>${escapeHtml(p.outcome)}</td><td>${Number(p.entry_price).toFixed(4)}</td>` +
       `<td>${Number(p.size_tokens).toFixed(2)}</td><td>${fmtUsd(p.cost_usd)}</td>` +
-      `<td>${new Date(p.opened_at).toLocaleString()}</td>`;
+      `<td>${new Date(p.opened_at).toLocaleString()}</td>` +
+      `<td class="reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</td>`;
     body.appendChild(tr);
   }
   $("positions-empty").style.display = s.open_positions.length ? "none" : "block";
@@ -183,9 +210,38 @@ function renderStatus(s) {
   $("btn-stop").disabled = s.state !== "running";
 }
 
+const EXIT_REASON_LABELS = {
+  take_profit: "Kâr Al",
+  stop_loss: "Zarar Durdur",
+  max_holding_time: "Süre Doldu",
+  manual_liquidation: "Manuel Likidasyon",
+};
+
+function renderTrades(trades) {
+  const body = $("trades-body");
+  body.innerHTML = "";
+  for (const t of trades) {
+    const tr = document.createElement("tr");
+    const pnl = Number(t.pnl_usd);
+    const reasonLabel = EXIT_REASON_LABELS[t.reason] || t.reason || "-";
+    const entryReason = t.entry_reason || "-";
+    const exitDetail = t.exit_reason_detail || "";
+    tr.innerHTML =
+      `<td>${escapeHtml(t.market_question)}</td><td>${escapeHtml(t.outcome)}</td>` +
+      `<td class="${pnl > 0 ? "pos" : pnl < 0 ? "neg" : ""}">${fmtUsd(pnl)}</td>` +
+      `<td><span class="reason-badge ${t.reason}" title="${escapeHtml(exitDetail)}">${escapeHtml(reasonLabel)}</span></td>` +
+      `<td class="reason" title="${escapeHtml(entryReason)}">${escapeHtml(entryReason)}</td>` +
+      `<td>${new Date(t.closed_at).toLocaleString()}</td>`;
+    body.appendChild(tr);
+  }
+  $("trades-empty").style.display = trades.length ? "none" : "block";
+  $("trades-table").style.display = trades.length ? "table" : "none";
+}
+
 async function refresh() {
   try {
     renderStatus(await api("/api/status"));
+    renderTrades(await api("/api/trades?limit=20"));
   } catch (e) {
     console.error(e);
   }

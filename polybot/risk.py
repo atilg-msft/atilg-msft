@@ -36,3 +36,24 @@ class RiskManager:
         if now - opened_at >= timedelta(minutes=self.settings.max_holding_minutes):
             return "max_holding_time"
         return None
+
+    def describe_exit(
+        self, position: Position, mark_price: float, reason: str, now: datetime
+    ) -> str:
+        """Human-readable detail for `reason`, shown alongside the trade in the control panel."""
+        pct_change = (mark_price - position.entry_price) / position.entry_price
+        if reason == "take_profit":
+            return (
+                f"Price {position.entry_price:.4f} -> {mark_price:.4f} ({pct_change:+.1%}), "
+                f"threshold +{self.settings.take_profit_pct:.0%}"
+            )
+        if reason == "stop_loss":
+            return (
+                f"Price {position.entry_price:.4f} -> {mark_price:.4f} ({pct_change:+.1%}), "
+                f"threshold -{self.settings.stop_loss_pct:.0%}"
+            )
+        if reason == "max_holding_time":
+            opened_at = datetime.fromisoformat(position.opened_at)
+            elapsed_minutes = (now - opened_at).total_seconds() / 60
+            return f"Held {elapsed_minutes:.0f}min >= max {self.settings.max_holding_minutes}min"
+        return ""

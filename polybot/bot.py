@@ -45,8 +45,15 @@ def run_cycle(
         if fill_price is None:
             logger.warning("exit signal for %s (%s) but sell failed; will retry next cycle", token_id, reason)
             continue
+        reason_detail = risk.describe_exit(position, mark, reason, now)
         portfolio.close_position(
-            token_id, fill_price, now, reason, settings.cooldown_minutes, trade_log_path
+            token_id,
+            fill_price,
+            now,
+            reason,
+            settings.cooldown_minutes,
+            trade_log_path,
+            exit_reason_detail=reason_detail,
         )
 
     equity = portfolio.equity(mark_prices)
@@ -77,6 +84,7 @@ def run_cycle(
                 fill_price,
                 size_usd,
                 now,
+                entry_reason=signal.reason,
             )
             equity = portfolio.equity({**mark_prices, signal.token_id: fill_price})
     else:

@@ -10,7 +10,7 @@ from typing import Callable
 from .bot import run_cycle
 from .config import SIGNAL_FILTER_CHOICES, STRATEGY_CHOICES, Settings
 from .execution.factory import get_executor
-from .portfolio import Portfolio, utcnow
+from .portfolio import Portfolio, read_recent_trades, utcnow
 from .risk import RiskManager
 from .strategy.smart_money import SmartMoneyTracker
 
@@ -200,6 +200,7 @@ class BotService:
                     "manual_liquidation",
                     self.settings.cooldown_minutes,
                     self.trade_log_path,
+                    exit_reason_detail="Requested from the control panel",
                 )
                 closed.append({"token_id": token_id, "exit_price": fill_price, "pnl_usd": pnl})
             self.portfolio.save(self.portfolio_path)
@@ -226,6 +227,9 @@ class BotService:
                 "last_error": self.last_error,
                 "poll_interval_seconds": self.settings.poll_interval_seconds,
             }
+
+    def recent_trades(self, limit: int = 20) -> list[dict]:
+        return read_recent_trades(self.trade_log_path, limit=limit)
 
     # -- background loop ------------------------------------------------------
 

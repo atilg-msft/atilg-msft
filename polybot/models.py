@@ -50,6 +50,7 @@ class Signal:
     momentum: float
     reference_price: float
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    reason: str = ""  # human-readable rationale, shown in the control panel
 
 
 @dataclass(frozen=True)

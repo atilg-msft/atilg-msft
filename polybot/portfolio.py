@@ -24,6 +24,8 @@ TRADE_LOG_FIELDS = [
     "pnl_usd",
     "pnl_pct",
     "reason",
+    "entry_reason",
+    "exit_reason_detail",
 ]
 
 
@@ -37,6 +39,7 @@ class Position:
     size_tokens: float
     cost_usd: float
     opened_at: str  # ISO 8601
+    entry_reason: str = ""  # human-readable rationale, shown in the control panel
 
 
 class Portfolio:
@@ -77,6 +80,7 @@ class Portfolio:
         fill_price: float,
         cost_usd: float,
         opened_at: datetime,
+        entry_reason: str = "",
     ) -> None:
         size_tokens = cost_usd / fill_price
         self.positions[token_id] = Position(
@@ -88,15 +92,17 @@ class Portfolio:
             size_tokens=size_tokens,
             cost_usd=cost_usd,
             opened_at=opened_at.isoformat(),
+            entry_reason=entry_reason,
         )
         self.cash -= cost_usd
         logger.info(
-            "OPEN %s (%s) %.4f tokens @ %.4f = $%.2f",
+            "OPEN %s (%s) %.4f tokens @ %.4f = $%.2f -- %s",
             outcome,
             market_question[:60],
             size_tokens,
             fill_price,
             cost_usd,
+            entry_reason,
         )
 
     def close_position(
@@ -107,6 +113,7 @@ class Portfolio:
         reason: str,
         cooldown_minutes: int,
         trade_log_path: Path,
+        exit_reason_detail: str = "",
     ) -> float:
         pos = self.positions.pop(token_id)
         proceeds_usd = pos.size_tokens * exit_price
@@ -135,14 +142,17 @@ class Portfolio:
                 "pnl_usd": pnl_usd,
                 "pnl_pct": pnl_pct,
                 "reason": reason,
+                "entry_reason": pos.entry_reason,
+                "exit_reason_detail": exit_reason_detail,
             },
         )
         logger.info(
-            "CLOSE %s (%s) @ %.4f reason=%s pnl=$%.2f (%.1f%%)",
+            "CLOSE %s (%s) @ %.4f reason=%s (%s) pnl=$%.2f (%.1f%%)",
             pos.outcome,
             pos.market_question[:60],
             exit_price,
             reason,
+            exit_reason_detail,
             pnl_usd,
             pnl_pct * 100,
         )
@@ -185,6 +195,16 @@ def _append_trade_row(path: Path, row: dict) -> None:
         if is_new:
             writer.writeheader()
         writer.writerow(row)
+
+
+def read_recent_trades(path: Path, limit: int = 20) -> list[dict]:
+    """Most-recent-first closed trades for the control panel's activity log."""
+    if not path.exists():
+        return []
+    with path.open(newline="") as f:
+        rows = list(csv.DictReader(f))
+    rows.reverse()
+    return rows[:limit]
 
 
 def utcnow() -> datetime:

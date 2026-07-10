@@ -89,5 +89,6 @@ def _apply_smart_money_filter(
             buy.wallet,
             buy.usd_size,
         )
+        signal.reason += f"; confirmed by wallet {buy.wallet[:10]}… buying ${buy.usd_size:.0f}"
         confirmed.append(signal)
     return confirmed

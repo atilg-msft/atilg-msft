@@ -81,3 +81,22 @@ def test_check_exit_none_when_within_bounds(tmp_path):
     risk = RiskManager(settings)
     position = make_position(entry_price=0.40, opened_minutes_ago=5)
     assert risk.check_exit(position, mark_price=0.42, now=datetime.now(timezone.utc)) is None
+
+
+def test_describe_exit_take_profit_mentions_prices_and_threshold(tmp_path):
+    settings = make_settings(tmp_path, take_profit_pct=0.15, stop_loss_pct=0.10)
+    risk = RiskManager(settings)
+    position = make_position(entry_price=0.40)
+    detail = risk.describe_exit(position, mark_price=0.47, reason="take_profit", now=datetime.now(timezone.utc))
+    assert "0.40" in detail and "0.47" in detail
+    assert "15%" in detail
+
+
+def test_describe_exit_max_holding_time_mentions_elapsed_minutes(tmp_path):
+    settings = make_settings(tmp_path, max_holding_minutes=60)
+    risk = RiskManager(settings)
+    position = make_position(entry_price=0.40, opened_minutes_ago=120)
+    now = datetime.now(timezone.utc)
+    detail = risk.describe_exit(position, mark_price=0.41, reason="max_holding_time", now=now)
+    assert "120" in detail
+    assert "60" in detail

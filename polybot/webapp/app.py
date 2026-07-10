@@ -30,6 +30,10 @@ def create_app(service: BotService) -> FastAPI:
     def get_status():
         return service.status()
 
+    @app.get("/api/trades")
+    def get_trades(limit: int = 20):
+        return service.recent_trades(limit=limit)
+
     @app.get("/api/strategy")
     def get_strategy():
         return service.get_strategy_info()
