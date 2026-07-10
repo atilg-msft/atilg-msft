@@ -33,7 +33,6 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    branch: claude/polymarket-trade-bot-b3l5i3   # configure required reviewers on this environment in repo settings
     steps:
       - uses: actions/checkout@v4
 
