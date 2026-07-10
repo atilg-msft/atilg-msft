@@ -111,8 +111,16 @@ for entry in "${SEED_SETTINGS[@]}"; do
 done
 
 echo "==> Building and pushing the image remotely via ACR Tasks (no local Docker needed)"
+# Tag with something unique per run (git SHA, falling back to a timestamp)
+# rather than only "latest" -- Container Apps needs the image *reference*
+# to change to reliably roll a new revision, and re-pushing the same
+# "latest" tag with a new digest underneath it is not guaranteed to do
+# that. Also set a matching --revision-suffix as a second, independent
+# guarantee of a fresh revision.
+IMAGE_TAG="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || date +%s)"
 az acr build \
   --registry "$ACR_NAME" \
+  --image "polybot:${IMAGE_TAG}" \
   --image "polybot:latest" \
   "$REPO_ROOT"
 
@@ -120,7 +128,8 @@ echo "==> Forcing the Container App to pick up the freshly built image"
 az containerapp update \
   --resource-group "$RESOURCE_GROUP" \
   --name "$CONTAINER_APP_NAME" \
-  --image "${ACR_LOGIN_SERVER}/polybot:latest" \
+  --image "${ACR_LOGIN_SERVER}/polybot:${IMAGE_TAG}" \
+  --revision-suffix "deploy${IMAGE_TAG}" \
   --output none
 
 echo ""
