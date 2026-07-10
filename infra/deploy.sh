@@ -36,11 +36,46 @@ DEPLOY_OUTPUT=$(az deployment group create \
 ACR_LOGIN_SERVER=$(echo "$DEPLOY_OUTPUT" | python3 -c "import json,sys; print(json.load(sys.stdin)['acrLoginServer']['value'])")
 ACR_NAME="${ACR_LOGIN_SERVER%%.*}"
 APP_CONFIG_NAME=$(echo "$DEPLOY_OUTPUT" | python3 -c "import json,sys; print(json.load(sys.stdin)['appConfigName']['value'])")
+APP_CONFIG_ENDPOINT=$(echo "$DEPLOY_OUTPUT" | python3 -c "import json,sys; print(json.load(sys.stdin)['appConfigEndpoint']['value'])")
 CONTAINER_APP_NAME="${NAME_PREFIX}-app"
 
+echo "==> Granting the deploying user 'App Configuration Data Owner' (needed to seed values below; harmless if already assigned)"
+APP_CONFIG_ID=$(az appconfig show --name "$APP_CONFIG_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv)
+CURRENT_USER_OID=$(az ad signed-in-user show --query id -o tsv 2>/dev/null || true)
+if [ -n "$CURRENT_USER_OID" ]; then
+  az role assignment create \
+    --assignee-object-id "$CURRENT_USER_OID" \
+    --assignee-principal-type User \
+    --role "App Configuration Data Owner" \
+    --scope "$APP_CONFIG_ID" \
+    --output none 2>/dev/null || true
+fi
+
 echo "==> Seeding App Configuration with default strategy/risk/scan parameters"
-# Uses the deploying user's own AAD login (--auth-mode login), not a local
-# access key, since the store has disableLocalAuth=true.
+# Talks to the REST API directly with the deploying user's own AAD token
+# rather than `az appconfig kv set`, which hits a CLI/SDK bug turning a
+# non-200 response into an unhandled JSONDecodeError instead of a clean
+# error. Non-fatal: the bot falls back to its own built-in defaults
+# (polybot/config.py) for any key that isn't in App Configuration yet, so a
+# failure here (e.g. the RBAC grant above hasn't propagated yet) shouldn't
+# block the rest of the deploy -- rerun this script, or set values by hand
+# in the Portal/`az appconfig kv set --auth-mode login`, whenever it's ready.
+seed_appconfig_key() {
+  local key="$1" value="$2" token code attempt
+  for attempt in 1 2 3 4 5 6; do
+    token=$(az account get-access-token --resource https://azconfig.io --query accessToken -o tsv)
+    code=$(curl -sS -o /dev/null -w "%{http_code}" -X PUT \
+      "${APP_CONFIG_ENDPOINT}/kv/${key}?api-version=1.0" \
+      -H "Authorization: Bearer $token" \
+      -H "Content-Type: application/vnd.microsoft.appconfig.kv+json" \
+      -d "{\"value\": \"${value}\"}")
+    if [ "$code" = "200" ]; then return 0; fi
+    sleep 10
+  done
+  echo "    WARNING: could not set $key (HTTP $code) -- bot will use its built-in default"
+  return 1
+}
+
 SEED_SETTINGS=(
   "POLYBOT_POLL_INTERVAL_SECONDS=60"
   "POLYBOT_MAX_MARKETS_SCANNED=200"
@@ -72,13 +107,7 @@ SEED_SETTINGS=(
 for entry in "${SEED_SETTINGS[@]}"; do
   key="${entry%%=*}"
   value="${entry#*=}"
-  az appconfig kv set \
-    --name "$APP_CONFIG_NAME" \
-    --key "$key" \
-    --value "$value" \
-    --auth-mode login \
-    --yes \
-    --output none
+  seed_appconfig_key "$key" "$value" || true
 done
 
 echo "==> Building and pushing the image remotely via ACR Tasks (no local Docker needed)"

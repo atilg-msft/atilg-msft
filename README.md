@@ -295,13 +295,13 @@ az ad app create --display-name "polybot-github-deploy"
 APP_ID=$(az ad app list --display-name "polybot-github-deploy" --query "[0].appId" -o tsv)
 az ad sp create --id "$APP_ID"
 
-# 2. Trust GitHub's OIDC token, scoped to this repo's "production" environment
-#    (matches the `environment: production` gate in the workflow, so it
-#    works regardless of which branch triggers the manual run)
+# 2. Trust GitHub's OIDC token, scoped to this repo's "prod" environment
+#    (matches the `environment: prod` gate in the workflow, so it works
+#    regardless of which branch triggers the manual run)
 az ad app federated-credential create --id "$APP_ID" --parameters '{
   "name": "github-polybot-deploy",
   "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "repo:atilg-msft/atilg-msft:environment:production",
+  "subject": "repo:atilg-msft/atilg-msft:environment:prod",
   "audiences": ["api://AzureADTokenExchange"]
 }'
 
@@ -324,7 +324,7 @@ Then in the GitHub repo:
 
 1. **Settings → Secrets and variables → Actions** — add `AZURE_CLIENT_ID`,
    `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` from the output above.
-2. **Settings → Environments → New environment → `production`** — optionally
+2. **Settings → Environments → New environment → `prod`** — optionally
    add required reviewers here, so a real person has to approve before the
    workflow touches Azure.
 3. **Actions tab → "Deploy to Azure" → Run workflow** — fill in the same
