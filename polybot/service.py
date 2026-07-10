@@ -78,6 +78,7 @@ class BotService:
         self.last_cycle_at = None
         self.last_error: str | None = None
         self.last_equity: float = self.portfolio.equity({})
+        self.last_mark_prices: dict[str, float] = {}
 
         if self._load_desired_state() == BotState.RUNNING:
             self.start(persist=False)
@@ -203,6 +204,7 @@ class BotService:
                     exit_reason_detail="Requested from the control panel",
                 )
                 closed.append({"token_id": token_id, "exit_price": fill_price, "pnl_usd": pnl})
+                self.last_mark_prices.pop(token_id, None)
             self.portfolio.save(self.portfolio_path)
             self.last_equity = self.portfolio.equity({})
             self.state = BotState.STOPPED
@@ -210,6 +212,18 @@ class BotService:
 
         logger.warning("liquidation complete: closed %d position(s)", len(closed))
         return {"closed_positions": closed, "cash": self.portfolio.cash}
+
+    def _position_view(self, position) -> dict:
+        d = asdict(position)
+        mark = self.last_mark_prices.get(position.token_id, position.entry_price)
+        current_value = mark * position.size_tokens
+        d["current_price"] = mark
+        d["current_value_usd"] = current_value
+        d["unrealized_pnl_usd"] = current_value - position.cost_usd
+        d["unrealized_pnl_pct"] = (
+            (current_value - position.cost_usd) / position.cost_usd if position.cost_usd else 0.0
+        )
+        return d
 
     def status(self) -> dict:
         with self.lock:
@@ -222,7 +236,7 @@ class BotService:
                 "equity": self.last_equity,
                 "realized_pnl": self.portfolio.realized_pnl,
                 "exposure_usd": self.portfolio.exposure_usd(),
-                "open_positions": [asdict(p) for p in self.portfolio.positions.values()],
+                "open_positions": [self._position_view(p) for p in self.portfolio.positions.values()],
                 "last_cycle_at": self.last_cycle_at.isoformat() if self.last_cycle_at else None,
                 "last_error": self.last_error,
                 "poll_interval_seconds": self.settings.poll_interval_seconds,
@@ -244,7 +258,7 @@ class BotService:
                         self.settings = refreshed
                         self.risk = RiskManager(refreshed)
                 with self.lock:
-                    equity = run_cycle(
+                    equity, mark_prices = run_cycle(
                         self.settings,
                         self.portfolio,
                         self.risk,
@@ -254,6 +268,7 @@ class BotService:
                     )
                     self.portfolio.save(self.portfolio_path)
                     self.last_equity = equity
+                    self.last_mark_prices = mark_prices
                     self.last_cycle_at = utcnow()
                     self.last_error = None
             except Exception as exc:

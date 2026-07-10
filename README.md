@@ -136,6 +136,13 @@ asked for rather than silently starting to trade or silently staying idle.
 Because state lives in-process (the portfolio, the loop thread), this is a
 **singleton service** — don't scale it beyond one replica.
 
+The **Açık Pozisyonlar** table shows entry price/cost next to the current
+mark price/value and unrealized P&L for each open position, computed from
+the same order-book mid-price fetched during the last trading cycle
+(`BotService.last_mark_prices`, refreshed every `poll_interval_seconds` —
+not on every page load, to avoid extra CLOB API calls just from someone
+having the panel open).
+
 There's also a **Strateji** card with two dropdowns:
 
 - **Strateji** — which strategy generates candidate signals. Only

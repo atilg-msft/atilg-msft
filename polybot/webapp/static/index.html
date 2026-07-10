@@ -131,7 +131,7 @@
     <strong>Açık Pozisyonlar</strong>
     <table id="positions-table">
       <thead>
-        <tr><th>Market</th><th>Outcome</th><th>Giriş</th><th>Adet</th><th>Maliyet</th><th>Açılış</th><th>Neden</th></tr>
+        <tr><th>Market</th><th>Outcome</th><th>Giriş</th><th>Güncel</th><th>Adet</th><th>Maliyet</th><th>Güncel Değer</th><th>Anlık K/Z</th><th>Açılış</th><th>Neden</th></tr>
       </thead>
       <tbody id="positions-body"></tbody>
     </table>
@@ -189,8 +189,14 @@ function renderStatus(s) {
   for (const p of s.open_positions) {
     const tr = document.createElement("tr");
     const reason = p.entry_reason || "-";
-    tr.innerHTML = `<td>${escapeHtml(p.market_question)}</td><td>${escapeHtml(p.outcome)}</td><td>${Number(p.entry_price).toFixed(4)}</td>` +
+    const pnl = Number(p.unrealized_pnl_usd);
+    const pnlPct = Number(p.unrealized_pnl_pct) * 100;
+    const pnlClass = pnl > 0 ? "pos" : pnl < 0 ? "neg" : "";
+    tr.innerHTML = `<td>${escapeHtml(p.market_question)}</td><td>${escapeHtml(p.outcome)}</td>` +
+      `<td>${Number(p.entry_price).toFixed(4)}</td><td>${Number(p.current_price).toFixed(4)}</td>` +
       `<td>${Number(p.size_tokens).toFixed(2)}</td><td>${fmtUsd(p.cost_usd)}</td>` +
+      `<td>${fmtUsd(p.current_value_usd)}</td>` +
+      `<td class="${pnlClass}">${fmtUsd(pnl)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%)</td>` +
       `<td>${new Date(p.opened_at).toLocaleString()}</td>` +
       `<td class="reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</td>`;
     body.appendChild(tr);

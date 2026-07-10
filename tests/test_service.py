@@ -44,6 +44,39 @@ def test_start_runs_cycles_and_stop_halts_thread(tmp_path, monkeypatch):
     assert not service._thread.is_alive()
 
 
+def test_status_includes_current_value_for_open_positions(tmp_path, monkeypatch):
+    monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    service = BotService(make_settings(tmp_path))
+    from polybot.portfolio import utcnow
+
+    service.portfolio.open_position(
+        token_id="tok-yes",
+        condition_id="0xabc",
+        market_question="Will it happen?",
+        outcome="Yes",
+        fill_price=0.40,
+        cost_usd=20.0,
+        opened_at=utcnow(),
+    )
+
+    service.start()
+    try:
+        deadline = time.monotonic() + 5
+        while service.status()["last_cycle_at"] is None and time.monotonic() < deadline:
+            time.sleep(0.1)
+
+        position = service.status()["open_positions"][0]
+        # fake_order_book: best_bid=0.45, best_ask=0.46 -> mid=0.455
+        assert position["current_price"] == 0.455
+        assert position["current_value_usd"] == 50 * 0.455
+        assert round(position["unrealized_pnl_usd"], 6) == round(50 * 0.455 - 20.0, 6)
+        assert position["unrealized_pnl_pct"] > 0
+    finally:
+        service.stop()
+
+
 def test_liquidate_closes_all_open_positions(tmp_path, monkeypatch):
     monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
     monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)

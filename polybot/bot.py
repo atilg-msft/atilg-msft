@@ -24,8 +24,10 @@ def run_cycle(
     executor,
     trade_log_path,
     smart_money: SmartMoneyTracker | None = None,
-) -> float:
-    """Run one scan/manage/trade cycle. Returns the resulting equity estimate."""
+) -> tuple[float, dict[str, float]]:
+    """Run one scan/manage/trade cycle. Returns (equity, mark_prices) --
+    mark_prices covers every position still open at the end of the cycle,
+    keyed by token_id, so callers can show current price/value per position."""
     now = utcnow()
     mark_prices: dict[str, float] = {}
 
@@ -86,7 +88,8 @@ def run_cycle(
                 now,
                 entry_reason=signal.reason,
             )
-            equity = portfolio.equity({**mark_prices, signal.token_id: fill_price})
+            mark_prices[signal.token_id] = fill_price
+            equity = portfolio.equity(mark_prices)
     else:
         logger.info("risk budget full (%d positions, $%.2f exposure) — skipping scan", len(portfolio.positions), portfolio.exposure_usd())
 
@@ -97,7 +100,7 @@ def run_cycle(
         len(portfolio.positions),
         portfolio.realized_pnl,
     )
-    return equity
+    return equity, mark_prices
 
 
 def main() -> None:
