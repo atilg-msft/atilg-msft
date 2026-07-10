@@ -1,0 +1,88 @@
+name: Deploy to Azure
+
+# Manual only -- this provisions/updates real, billable Azure resources and
+# can enable real-money trading (polybot_mode=live), so it never runs on a
+# push/PR. Trigger it from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      resource_group:
+        description: "Azure resource group (created if it doesn't exist)"
+        required: true
+      location:
+        description: "Azure region"
+        required: false
+        default: "centralus"
+      name_prefix:
+        description: "Resource name prefix"
+        required: false
+        default: "polybot"
+      polybot_mode:
+        description: "paper (simulated) or live (real orders, real funds)"
+        required: false
+        default: "paper"
+        type: choice
+        options:
+          - paper
+          - live
+
+permissions:
+  id-token: write   # required for Azure OIDC login (no stored secret/password)
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production   # configure required reviewers on this environment in repo settings
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure resource group exists
+        run: |
+          az group create \
+            --name "${{ inputs.resource_group }}" \
+            --location "${{ inputs.location }}" \
+            --output none
+
+      - name: Deploy infrastructure (Bicep)
+        run: |
+          az deployment group create \
+            --resource-group "${{ inputs.resource_group }}" \
+            --template-file infra/main.bicep \
+            --parameters namePrefix="${{ inputs.name_prefix }}" polybotMode="${{ inputs.polybot_mode }}" \
+            --query properties.outputs -o json > outputs.json
+          cat outputs.json
+
+      - name: Build and push image via ACR Tasks (no Docker needed on the runner)
+        run: |
+          ACR_LOGIN_SERVER=$(jq -r '.acrLoginServer.value' outputs.json)
+          ACR_NAME="${ACR_LOGIN_SERVER%%.*}"
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "polybot:${{ github.sha }}" \
+            --image "polybot:latest" \
+            .
+          echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> "$GITHUB_ENV"
+
+      - name: Point the Container App at the new image
+        run: |
+          az containerapp update \
+            --resource-group "${{ inputs.resource_group }}" \
+            --name "${{ inputs.name_prefix }}-app" \
+            --image "${ACR_LOGIN_SERVER}/polybot:${{ github.sha }}" \
+            --output none
+
+      - name: Summary
+        run: |
+          echo "### Deploy complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Control panel: $(jq -r '.containerAppUrl.value' outputs.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Key Vault: $(jq -r '.keyVaultName.value' outputs.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- App Configuration: $(jq -r '.appConfigName.value' outputs.json)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Mode: ${{ inputs.polybot_mode }}" >> "$GITHUB_STEP_SUMMARY"

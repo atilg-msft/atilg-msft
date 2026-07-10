@@ -279,6 +279,58 @@ az appconfig kv set --name <appConfigName> --key POLYBOT_MOMENTUM_THRESHOLD --va
 > `az deployment group validate` (or `--what-if`) before applying it for
 > real, and treat the first deploy as a dry run you watch closely.
 
+### Deploying via GitHub Actions
+
+`.github/workflows/deploy-azure.yml` runs the same steps as `deploy.sh`
+from CI. It's **manual-only** (`workflow_dispatch`, never on push) since it
+provisions real, billable Azure resources and can enable live trading.
+
+One-time setup — this creates an Azure AD app registration and grants it
+access, so it needs to be run once by someone with rights on the target
+subscription (not something a CI job can bootstrap for itself):
+
+```bash
+# 1. App registration + service principal for GitHub OIDC (no password/secret ever stored)
+az ad app create --display-name "polybot-github-deploy"
+APP_ID=$(az ad app list --display-name "polybot-github-deploy" --query "[0].appId" -o tsv)
+az ad sp create --id "$APP_ID"
+
+# 2. Trust GitHub's OIDC token, scoped to this repo's "production" environment
+#    (matches the `environment: production` gate in the workflow, so it
+#    works regardless of which branch triggers the manual run)
+az ad app federated-credential create --id "$APP_ID" --parameters '{
+  "name": "github-polybot-deploy",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:atilg-msft/atilg-msft:environment:production",
+  "audiences": ["api://AzureADTokenExchange"]
+}'
+
+# 3. Grant it rights on the target resource group. User Access Administrator
+#    (not just Contributor) is needed because the Bicep template creates
+#    RBAC role assignments for the container app's managed identity.
+RG=polybot-rg
+SUB_ID=$(az account show --query id -o tsv)
+az group create --name "$RG" --location centralus
+az role assignment create --assignee "$APP_ID" --role Contributor --scope "/subscriptions/$SUB_ID/resourceGroups/$RG"
+az role assignment create --assignee "$APP_ID" --role "User Access Administrator" --scope "/subscriptions/$SUB_ID/resourceGroups/$RG"
+
+# 4. Values for the GitHub secrets below
+echo "AZURE_CLIENT_ID=$APP_ID"
+echo "AZURE_TENANT_ID=$(az account show --query tenantId -o tsv)"
+echo "AZURE_SUBSCRIPTION_ID=$SUB_ID"
+```
+
+Then in the GitHub repo:
+
+1. **Settings → Secrets and variables → Actions** — add `AZURE_CLIENT_ID`,
+   `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` from the output above.
+2. **Settings → Environments → New environment → `production`** — optionally
+   add required reviewers here, so a real person has to approve before the
+   workflow touches Azure.
+3. **Actions tab → "Deploy to Azure" → Run workflow** — fill in the same
+   resource group you granted the role assignment on above, plus region,
+   name prefix, and `paper`/`live` mode.
+
 ## Project layout
 
 ```
@@ -314,5 +366,7 @@ tests/                   unit tests for momentum, risk, portfolio, service, weba
 infra/
   main.bicep             Container Apps env, ACR, Key Vault, App Config, storage
   deploy.sh               end-to-end deploy script (az CLI, no Docker needed)
+.github/workflows/
+  deploy-azure.yml       same deploy, from CI (manual trigger, OIDC login)
 Dockerfile               multi-stage build for the Container App image
 ```
