@@ -62,11 +62,37 @@ Two ticks run at different speeds (`polybot/service.py`'s `BotService._loop`):
      the control panel's **Sinyal** dropdown), candidates are then filtered
      down to ones a tracked high-PnL wallet also just bought (see
      [Smart-money confirmation filter](#smart-money-confirmation-filter)).
+   - A market whose *other* outcome has ever been traded is skipped
+     entirely, permanently -- see
+     [One direction per market](#one-direction-per-market).
    - Signals are opened in order, sized by `RiskManager` (percent-of-equity,
      capped by a max USD per position, total position count, and total
      exposure as a percent of equity), until the budget runs out.
-3. Portfolio state is saved to `data/portfolio.json` after every cycle;
-   closed trades are appended to `data/trades.csv`.
+
+Portfolio state is saved to `data/portfolio.json` after every cycle;
+closed trades are appended to `data/trades.csv`.
+
+### One direction per market
+
+Because YES and NO of the same market are scanned as independent tokens (see
+above), nothing originally stopped the bot from opening a position on YES,
+closing it, and later opening a position on NO of that *same* market —
+trading both directions of what's roughly a self-cancelling YES+NO≈1 bet.
+Trade-log analysis found 39 of 88 markets traded (67% of all trades) had
+gone both ways like this, and re-simulating the trade history with a
+one-direction lock in place showed it would have improved net P&L by
+roughly $53 (about a fifth of total realized losses over that period) --
+avoided losing trades outnumbered forgone winning ones by 35 to 20.
+
+`Portfolio.traded_markets` (`polybot/portfolio.py`) now records the first
+token_id ever opened per `condition_id`, permanently -- not a time-limited
+cooldown like `cooldown_until`. `is_market_locked_out()` blocks any signal
+for a different outcome of that same market, in `scanner.generate_signals()`,
+even if the original position has long since closed. On startup,
+`Portfolio.load_or_create()` backfills this lock from `trades.csv` history
+(ordered by `opened_at`, merged with any still-open positions) so markets
+that already went both ways before this existed stay locked going forward
+too -- not just newly-opened positions.
 
 There are two ways to run it:
 

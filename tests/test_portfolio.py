@@ -1,3 +1,6 @@
+import json
+from datetime import datetime
+
 from polybot.portfolio import TRADE_LOG_FIELDS, Portfolio, read_recent_trades, utcnow
 
 
@@ -149,6 +152,123 @@ def test_json_roundtrip(tmp_path):
 
     assert loaded.cash == portfolio.cash
     assert loaded.positions["tok-yes"].entry_price == 0.40
+
+
+def test_opening_a_position_locks_out_the_opposite_outcome_forever(tmp_path):
+    portfolio = Portfolio(cash=1000)
+    now = utcnow()
+    trade_log_path = tmp_path / "trades.csv"
+
+    portfolio.open_position(
+        token_id="tok-yes",
+        condition_id="0xcond",
+        market_question="Will it happen?",
+        outcome="Yes",
+        fill_price=0.40,
+        cost_usd=20.0,
+        opened_at=now,
+    )
+    assert portfolio.is_market_locked_out("0xcond", "tok-no") is True
+    assert portfolio.is_market_locked_out("0xcond", "tok-yes") is False  # same side stays fine
+    assert portfolio.is_market_locked_out("0xother-cond", "tok-no") is False  # different market
+
+    # Closing the Yes side must NOT lift the lock on the opposite outcome.
+    portfolio.close_position(
+        token_id="tok-yes",
+        exit_price=0.50,
+        closed_at=now,
+        reason="take_profit",
+        cooldown_minutes=30,
+        trade_log_path=trade_log_path,
+    )
+    assert portfolio.is_market_locked_out("0xcond", "tok-no") is True
+
+    # Re-entering the same side later (after cooldown) is still allowed.
+    assert portfolio.is_market_locked_out("0xcond", "tok-yes") is False
+
+
+def test_load_or_create_backfills_lock_from_closed_trade_history(tmp_path):
+    """A market whose opposite side was already closed *before* this lock
+    existed (i.e. only recorded in trades.csv, not in a fresh portfolio.json)
+    must still come back locked once the portfolio reloads."""
+    trade_log_path = tmp_path / "trades.csv"
+    portfolio_path = tmp_path / "portfolio.json"
+
+    seed = Portfolio(cash=1000)
+    seed.open_position(
+        token_id="tok-yes",
+        condition_id="0xcond",
+        market_question="Will it happen?",
+        outcome="Yes",
+        fill_price=0.40,
+        cost_usd=20.0,
+        opened_at=utcnow(),
+    )
+    seed.close_position(
+        token_id="tok-yes",
+        exit_price=0.50,
+        closed_at=utcnow(),
+        reason="take_profit",
+        cooldown_minutes=30,
+        trade_log_path=trade_log_path,
+    )
+    # Simulate a portfolio.json saved *before* traded_markets existed.
+    stale_snapshot = seed.to_dict()
+    del stale_snapshot["traded_markets"]
+    portfolio_path.write_text(json.dumps(stale_snapshot))
+
+    reloaded = Portfolio.load_or_create(portfolio_path, starting_cash=1000, trade_log_path=trade_log_path)
+
+    assert reloaded.is_market_locked_out("0xcond", "tok-no") is True
+
+
+def test_load_or_create_orders_backfill_by_opened_at_not_encounter_order(tmp_path):
+    """An open position (in portfolio.json) that was actually opened *after*
+    an earlier, already-closed trade on the other side (in trades.csv) must
+    not incorrectly win the lock just because it's read first."""
+    trade_log_path = tmp_path / "trades.csv"
+    portfolio_path = tmp_path / "portfolio.json"
+
+    seed = Portfolio(cash=1000)
+    seed.open_position(
+        token_id="tok-yes",
+        condition_id="0xcond",
+        market_question="Will it happen?",
+        outcome="Yes",
+        fill_price=0.40,
+        cost_usd=20.0,
+        opened_at=datetime.fromisoformat("2026-01-01T00:00:00+00:00"),
+    )
+    seed.close_position(
+        token_id="tok-yes",
+        exit_price=0.50,
+        closed_at=datetime.fromisoformat("2026-01-01T01:00:00+00:00"),
+        reason="take_profit",
+        cooldown_minutes=30,
+        trade_log_path=trade_log_path,
+    )
+
+    # A currently-open No position, opened *later* than the Yes trade above.
+    still_open = Portfolio(cash=980)
+    still_open.open_position(
+        token_id="tok-no",
+        condition_id="0xcond",
+        market_question="Will it happen?",
+        outcome="No",
+        fill_price=0.55,
+        cost_usd=20.0,
+        opened_at=datetime.fromisoformat("2026-01-02T00:00:00+00:00"),
+    )
+    stale_snapshot = still_open.to_dict()
+    del stale_snapshot["traded_markets"]
+    portfolio_path.write_text(json.dumps(stale_snapshot))
+
+    reloaded = Portfolio.load_or_create(portfolio_path, starting_cash=1000, trade_log_path=trade_log_path)
+
+    # The Yes trade from trades.csv happened first chronologically, so it
+    # -- not the currently-open No position -- holds the market's lock.
+    assert reloaded.traded_markets["0xcond"] == "tok-yes"
+    assert reloaded.is_market_locked_out("0xcond", "tok-no") is True
 
 
 def test_equity_uses_mark_prices_with_entry_fallback():

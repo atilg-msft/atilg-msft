@@ -1,6 +1,9 @@
+from datetime import datetime, timezone
+
 from polybot.config import Settings
-from polybot.models import Signal
-from polybot.scanner import _apply_smart_money_filter
+from polybot.models import Market, OrderBook, PricePoint, Signal
+from polybot.portfolio import Portfolio
+from polybot.scanner import _apply_smart_money_filter, generate_signals
 
 
 class FakeTracker:
@@ -64,3 +67,40 @@ def test_filter_noop_on_empty_signals(tmp_path):
 
     assert result == []
     assert tracker.refreshed is False
+
+
+def test_generate_signals_skips_the_locked_out_opposite_outcome(tmp_path, monkeypatch):
+    settings = Settings(data_dir=tmp_path, momentum_threshold=0.05, min_price=0.05, max_price=0.95)
+    market = Market(
+        condition_id="0xcond",
+        question="Will it happen?",
+        slug="will-it-happen",
+        token_ids=["tok-yes", "tok-no"],
+        outcomes=["Yes", "No"],
+        volume_24h=10_000,
+        liquidity=5_000,
+    )
+
+    def fake_history(settings, token_id, lookback_minutes):
+        span = lookback_minutes * 60
+        # Strong upward momentum for both tokens -- both would qualify as
+        # signals if the market-level lock didn't block the opposite side.
+        return [
+            PricePoint(ts=0, price=0.40),
+            PricePoint(ts=span // 2, price=0.45),
+            PricePoint(ts=span, price=0.55),
+        ]
+
+    def fake_book(settings, token_id):
+        return OrderBook(token_id=token_id, best_bid=0.54, best_ask=0.56)
+
+    monkeypatch.setattr("polybot.scanner.clob.get_price_history", fake_history)
+    monkeypatch.setattr("polybot.scanner.clob.get_order_book", fake_book)
+
+    portfolio = Portfolio(cash=1000)
+    portfolio.traded_markets["0xcond"] = "tok-yes"  # market already committed to the Yes side
+
+    signals = generate_signals(settings, [market], portfolio, datetime.now(timezone.utc))
+
+    # tok-no is permanently locked out; tok-yes (same side) is still a valid signal.
+    assert [s.token_id for s in signals] == ["tok-yes"]

@@ -141,7 +141,7 @@ def main() -> None:
 
     portfolio_path = settings.data_dir / "portfolio.json"
     trade_log_path = settings.data_dir / "trades.csv"
-    portfolio = Portfolio.load_or_create(portfolio_path, settings.starting_cash)
+    portfolio = Portfolio.load_or_create(portfolio_path, settings.starting_cash, trade_log_path=trade_log_path)
     risk = RiskManager(settings)
     executor = get_executor(settings)
     smart_money = SmartMoneyTracker()

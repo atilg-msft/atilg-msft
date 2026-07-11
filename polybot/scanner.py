@@ -38,6 +38,8 @@ def generate_signals(
                 continue
             if portfolio.is_in_cooldown(token_id, now):
                 continue
+            if portfolio.is_market_locked_out(market.condition_id, token_id):
+                continue
             candidates.append((market, token_id))
 
     if not candidates:

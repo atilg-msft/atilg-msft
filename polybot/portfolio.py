@@ -49,11 +49,19 @@ class Portfolio:
         positions: dict[str, Position] | None = None,
         cooldown_until: dict[str, str] | None = None,
         realized_pnl: float = 0.0,
+        traded_markets: dict[str, str] | None = None,
     ) -> None:
         self.cash = cash
         self.positions: dict[str, Position] = positions or {}
         self.cooldown_until: dict[str, str] = cooldown_until or {}
         self.realized_pnl = realized_pnl
+        # condition_id -> the one token_id (outcome) ever opened for that
+        # market. Permanent, not time-limited like cooldown_until: once a
+        # market has been traded on one side, the opposite side is locked
+        # out for good -- even after the original position closes -- so the
+        # bot never ends up paying entry/exit costs on both legs of what's
+        # roughly a self-cancelling YES+NO≈1 hedge (see is_market_locked_out).
+        self.traded_markets: dict[str, str] = traded_markets or {}
 
     def equity(self, mark_prices: dict[str, float]) -> float:
         value = self.cash
@@ -70,6 +78,13 @@ class Portfolio:
         if until is None:
             return False
         return datetime.fromisoformat(until) > now
+
+    def is_market_locked_out(self, condition_id: str, token_id: str) -> bool:
+        """True if some *other* outcome of this market was already traded --
+        permanently blocking entry into this token_id regardless of whether
+        that other position is still open or has long since closed."""
+        locked_token_id = self.traded_markets.get(condition_id)
+        return locked_token_id is not None and locked_token_id != token_id
 
     def open_position(
         self,
@@ -94,6 +109,7 @@ class Portfolio:
             opened_at=opened_at.isoformat(),
             entry_reason=entry_reason,
         )
+        self.traded_markets.setdefault(condition_id, token_id)
         self.cash -= cost_usd
         logger.info(
             "OPEN %s (%s) %.4f tokens @ %.4f = $%.2f -- %s",
@@ -164,6 +180,7 @@ class Portfolio:
             "realized_pnl": self.realized_pnl,
             "positions": {tid: asdict(p) for tid, p in self.positions.items()},
             "cooldown_until": self.cooldown_until,
+            "traded_markets": self.traded_markets,
         }
 
     @classmethod
@@ -176,16 +193,54 @@ class Portfolio:
             positions=positions,
             cooldown_until=data.get("cooldown_until", {}),
             realized_pnl=data.get("realized_pnl", 0.0),
+            traded_markets=data.get("traded_markets", {}),
         )
 
     def save(self, path: Path) -> None:
         path.write_text(json.dumps(self.to_dict(), indent=2))
 
     @classmethod
-    def load_or_create(cls, path: Path, starting_cash: float) -> "Portfolio":
-        if path.exists():
-            return cls.from_dict(json.loads(path.read_text()))
-        return cls(cash=starting_cash)
+    def load_or_create(
+        cls, path: Path, starting_cash: float, trade_log_path: Path | None = None
+    ) -> "Portfolio":
+        portfolio = (
+            cls.from_dict(json.loads(path.read_text())) if path.exists() else cls(cash=starting_cash)
+        )
+        # Backfill traded_markets from trade history so the one-direction-
+        # per-market lock also covers markets whose opposite side was
+        # already traded and closed before this lock existed -- not only
+        # positions opened from now on.
+        for condition_id, token_id in _earliest_outcome_per_market(
+            trade_log_path, portfolio.positions
+        ).items():
+            portfolio.traded_markets.setdefault(condition_id, token_id)
+        return portfolio
+
+
+def _earliest_outcome_per_market(
+    trade_log_path: Path | None, open_positions: dict[str, Position]
+) -> dict[str, str]:
+    """Which token_id was opened first, per condition_id, across both closed
+    trades (trades.csv) and any currently open positions -- combined and
+    ordered by opened_at so a position still open today doesn't wrongly
+    "win" the lock over an earlier, already-closed trade on the other side."""
+    entries: list[tuple[str, str, str]] = []  # (opened_at, condition_id, token_id)
+    if trade_log_path is not None and trade_log_path.exists():
+        with trade_log_path.open(newline="") as f:
+            for row in csv.DictReader(f):
+                opened_at = row.get("opened_at")
+                condition_id = row.get("condition_id")
+                token_id = row.get("token_id")
+                if opened_at and condition_id and token_id:
+                    entries.append((opened_at, condition_id, token_id))
+    for pos in open_positions.values():
+        entries.append((pos.opened_at, pos.condition_id, pos.token_id))
+
+    entries.sort(key=lambda e: e[0])
+    first_outcome: dict[str, str] = {}
+    for _, condition_id, token_id in entries:
+        first_outcome.setdefault(condition_id, token_id)
+    return first_outcome
 
 
 def _migrate_trade_log_if_needed(path: Path) -> None:

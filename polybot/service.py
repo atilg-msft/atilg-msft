@@ -59,7 +59,9 @@ class BotService:
         self.strategy_override_path = settings.data_dir / "strategy_override.json"
 
         self.lock = threading.RLock()
-        self.portfolio = Portfolio.load_or_create(self.portfolio_path, settings.starting_cash)
+        self.portfolio = Portfolio.load_or_create(
+            self.portfolio_path, settings.starting_cash, trade_log_path=self.trade_log_path
+        )
 
         # A strategy/signal_filter chosen from the control panel is persisted
         # here and takes precedence over whatever env vars/App Configuration
