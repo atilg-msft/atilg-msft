@@ -17,22 +17,28 @@ logger = logging.getLogger(__name__)
 MIN_TRADE_USD = 1.0
 
 
-def run_cycle(
+def manage_positions(
     settings: Settings,
     portfolio: Portfolio,
     risk: RiskManager,
     executor,
     trade_log_path,
-    smart_money: SmartMoneyTracker | None = None,
-) -> tuple[float, dict[str, float]]:
-    """Run one scan/manage/trade cycle. Returns (equity, mark_prices) --
-    mark_prices covers every position still open at the end of the cycle,
-    keyed by token_id, so callers can show current price/value per position."""
+) -> dict[str, float]:
+    """Check exit conditions for existing open positions only -- no market
+    scan, no new entries. Returns mark_prices for every position still open,
+    keyed by token_id.
+
+    Split out from `run_cycle` so a fast position-monitoring tick (default
+    5s, see BotService._loop) can react to stop-loss/take-profit crossings
+    between the slower full scan cycles, instead of only checking prices
+    once per `poll_interval_seconds` -- on thin/volatile markets a price can
+    blow well past the configured stop-loss in the gap between two 60s
+    checks, so tightening this tick is the main lever for capping realized
+    losses closer to the configured threshold.
+    """
     now = utcnow()
     mark_prices: dict[str, float] = {}
 
-    # 1. Manage existing positions first: exit signals take priority over
-    # opening new ones so exposure/position-count checks below see fresh state.
     from .api import clob  # local import keeps module import graph simple
 
     for token_id, position in list(portfolio.positions.items()):
@@ -57,6 +63,26 @@ def run_cycle(
             trade_log_path,
             exit_reason_detail=reason_detail,
         )
+
+    return mark_prices
+
+
+def run_cycle(
+    settings: Settings,
+    portfolio: Portfolio,
+    risk: RiskManager,
+    executor,
+    trade_log_path,
+    smart_money: SmartMoneyTracker | None = None,
+) -> tuple[float, dict[str, float]]:
+    """Run one scan/manage/trade cycle. Returns (equity, mark_prices) --
+    mark_prices covers every position still open at the end of the cycle,
+    keyed by token_id, so callers can show current price/value per position."""
+    now = utcnow()
+
+    # 1. Manage existing positions first: exit signals take priority over
+    # opening new ones so exposure/position-count checks below see fresh state.
+    mark_prices = manage_positions(settings, portfolio, risk, executor, trade_log_path)
 
     equity = portfolio.equity(mark_prices)
 

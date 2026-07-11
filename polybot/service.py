@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from dataclasses import asdict, replace
 from enum import Enum
 from typing import Callable
 
-from .bot import run_cycle
+from .bot import manage_positions, run_cycle
 from .cloud.keyvault import KeyVaultSecretsProvider
 from .config import SIGNAL_FILTER_CHOICES, STRATEGY_CHOICES, Settings
 from .execution.factory import get_executor
@@ -275,6 +276,7 @@ class BotService:
                 "last_cycle_at": self.last_cycle_at.isoformat() if self.last_cycle_at else None,
                 "last_error": self.last_error,
                 "poll_interval_seconds": self.settings.poll_interval_seconds,
+                "position_check_interval_seconds": self.settings.position_check_interval_seconds,
             }
 
     def recent_trades(self, limit: int = 20) -> list[dict]:
@@ -321,6 +323,10 @@ class BotService:
         self.risk = RiskManager(refreshed)
 
     def _loop(self) -> None:
+        # `last_full_cycle_at = 0.0` guarantees the very first tick always
+        # runs the full scan/entry cycle (any real time.monotonic() reading
+        # is far past it), matching pre-split behavior on startup.
+        last_full_cycle_at = 0.0
         while not self._stop_event.is_set():
             try:
                 if self.keyvault_provider is not None:
@@ -331,21 +337,40 @@ class BotService:
                         if self._manual_overrides:
                             refreshed = replace(refreshed, **self._manual_overrides)
                         self._apply_settings(refreshed)
+
+                now_monotonic = time.monotonic()
+                due_for_full_cycle = (
+                    now_monotonic - last_full_cycle_at >= self.settings.poll_interval_seconds
+                )
                 with self.lock:
-                    equity, mark_prices = run_cycle(
-                        self.settings,
-                        self.portfolio,
-                        self.risk,
-                        self.executor,
-                        self.trade_log_path,
-                        smart_money=self.smart_money,
-                    )
+                    if due_for_full_cycle:
+                        equity, mark_prices = run_cycle(
+                            self.settings,
+                            self.portfolio,
+                            self.risk,
+                            self.executor,
+                            self.trade_log_path,
+                            smart_money=self.smart_money,
+                        )
+                    else:
+                        # Fast tick: only re-check open positions against
+                        # stop-loss/take-profit -- no market scan/new entries.
+                        mark_prices = manage_positions(
+                            self.settings,
+                            self.portfolio,
+                            self.risk,
+                            self.executor,
+                            self.trade_log_path,
+                        )
+                        equity = self.portfolio.equity(mark_prices)
                     self.portfolio.save(self.portfolio_path)
                     self.last_equity = equity
                     self.last_mark_prices = mark_prices
                     self.last_cycle_at = utcnow()
                     self.last_error = None
+                if due_for_full_cycle:
+                    last_full_cycle_at = now_monotonic
             except Exception as exc:
                 logger.exception("cycle failed")
                 self.last_error = str(exc)
-            self._stop_event.wait(self.settings.poll_interval_seconds)
+            self._stop_event.wait(self.settings.position_check_interval_seconds)

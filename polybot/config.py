@@ -41,6 +41,12 @@ class Settings:
     poll_interval_seconds: int = field(
         default_factory=lambda: _env_int("POLYBOT_POLL_INTERVAL_SECONDS", 60)
     )
+    # How often open positions are checked for stop-loss/take-profit, separate
+    # from (and normally much shorter than) the full scan cycle above -- see
+    # bot.py's manage_positions() and BotService._loop().
+    position_check_interval_seconds: int = field(
+        default_factory=lambda: _env_int("POLYBOT_POSITION_CHECK_INTERVAL_SECONDS", 5)
+    )
 
     # API endpoints
     clob_api_url: str = field(

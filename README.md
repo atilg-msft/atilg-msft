@@ -30,13 +30,20 @@ management, and paper-trading simulation here are new.
 
 ## How it works
 
-Every `POLYBOT_POLL_INTERVAL_SECONDS` (default 60s), one cycle runs:
+Two ticks run at different speeds (`polybot/service.py`'s `BotService._loop`):
 
-1. **Manage open positions.** For each held token, fetch the current order
-   book mid-price and check take-profit / stop-loss / max-holding-time exit
-   rules (`polybot/risk.py`). Exits are simulated (or, in live mode, sent as
-   real sell orders) before anything new is opened.
-2. **Scan for entries**, only if there's room under the risk budget:
+- Every `POLYBOT_POSITION_CHECK_INTERVAL_SECONDS` (default 5s): **manage open
+  positions only** (`polybot/bot.py`'s `manage_positions()`) — for each held
+  token, fetch the current order book mid-price and check take-profit /
+  stop-loss / max-holding-time exit rules (`polybot/risk.py`). This tick is
+  intentionally fast and separate from the full scan below: on thin/volatile
+  markets (e.g. in-play sports outcomes) price can blow well past a
+  configured stop-loss in the gap between two checks, so a short interval
+  here is what actually keeps realized losses close to the configured
+  threshold rather than a much larger one discovered late.
+- Every `POLYBOT_POLL_INTERVAL_SECONDS` (default 60s): a **full cycle** runs,
+  which manages open positions (same as above) *and then* scans for new
+  entries, only if there's room under the risk budget:
    - Discover active markets from the Gamma API, filtered by 24h volume and
      liquidity thresholds (`polybot/api/gamma.py`).
    - For every outcome token (YES *and* NO are scanned independently — a

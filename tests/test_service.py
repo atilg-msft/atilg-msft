@@ -321,6 +321,44 @@ def test_executor_rebuild_failure_rolls_back_settings_too(tmp_path, monkeypatch)
         service.stop()
 
 
+def test_fast_tick_manages_positions_without_waiting_for_full_cycle(tmp_path, monkeypatch):
+    scan_calls = []
+
+    def counting_discover_markets(settings):
+        scan_calls.append(1)
+        return []
+
+    monkeypatch.setattr("polybot.bot.discover_markets", counting_discover_markets)
+    monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
+
+    # poll_interval_seconds is deliberately huge so the full scan cycle would
+    # never run within the test's timeout -- only the fast position-check
+    # tick (1s here) can be what closes the position below.
+    settings = make_settings(tmp_path, poll_interval_seconds=3600, position_check_interval_seconds=1)
+    service = BotService(settings)
+    from polybot.portfolio import utcnow
+
+    service.portfolio.open_position(
+        token_id="tok-yes",
+        condition_id="0xabc",
+        market_question="Will it happen?",
+        outcome="Yes",
+        fill_price=1.0,  # mid=0.455 is a huge drop past the default 10% stop-loss
+        cost_usd=20.0,
+        opened_at=utcnow(),
+    )
+
+    service.start()
+    try:
+        deadline = time.monotonic() + 5
+        while "tok-yes" in service.portfolio.positions and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert "tok-yes" not in service.portfolio.positions
+        assert scan_calls == []  # the 3600s full cycle never fired
+    finally:
+        service.stop()
+
+
 def test_keyvault_provider_refreshed_every_cycle(tmp_path, monkeypatch):
     monkeypatch.setattr("polybot.bot.discover_markets", lambda settings: [])
     monkeypatch.setattr("polybot.api.clob.get_order_book", fake_order_book)
