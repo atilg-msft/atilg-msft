@@ -52,8 +52,12 @@ Two ticks run at different speeds (`polybot/service.py`'s `BotService._loop`):
      relative price change from the oldest to the newest point in the
      lookback window (`polybot/strategy/momentum.py`).
    - Tokens whose momentum clears `POLYBOT_MOMENTUM_THRESHOLD`, and whose
-     price isn't already near 0 or 1 (no edge left near resolution), become
-     candidate signals, ranked by strength.
+     price falls within `[POLYBOT_MIN_PRICE, POLYBOT_MAX_PRICE]` (default
+     0.15-0.85), become candidate signals, ranked by strength. Trade-log
+     analysis showed entries outside that band (price <0.15 or >0.85 --
+     thin order books close to a market's resolution) realizing roughly 3x
+     worse average P&L than mid-range entries, so the default band is
+     deliberately tighter than "not literally 0 or 1".
    - If `POLYBOT_SIGNAL_FILTER=smart_money` (env var, App Configuration, or
      the control panel's **Sinyal** dropdown), candidates are then filtered
      down to ones a tracked high-PnL wallet also just bought (see

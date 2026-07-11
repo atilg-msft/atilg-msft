@@ -81,8 +81,8 @@ class Settings:
     min_liquidity: float = field(
         default_factory=lambda: _env_float("POLYBOT_MIN_LIQUIDITY", 500.0)
     )
-    min_price: float = field(default_factory=lambda: _env_float("POLYBOT_MIN_PRICE", 0.05))
-    max_price: float = field(default_factory=lambda: _env_float("POLYBOT_MAX_PRICE", 0.95))
+    min_price: float = field(default_factory=lambda: _env_float("POLYBOT_MIN_PRICE", 0.15))
+    max_price: float = field(default_factory=lambda: _env_float("POLYBOT_MAX_PRICE", 0.85))
 
     # Momentum strategy
     lookback_minutes: int = field(
