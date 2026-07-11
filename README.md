@@ -183,11 +183,12 @@ having the panel open).
 
 There's also a **Strateji** card with two dropdowns:
 
-- **Strateji** — which strategy generates candidate signals. Only
-  `Momentum` exists today; the dropdown is there so adding a second
-  strategy later doesn't need new UI.
-- **Sinyal** — `Yok` (momentum trades on its own) or `Akıllı Cüzdan Onayı`
-  (momentum candidates are also required to match a
+- **Strateji** — which strategy generates candidate signals:
+  `Momentum` (bet a price move continues) or `Mean Reversion` (bet a price
+  that dropped well below its own recent average bounces back toward it --
+  see [Strategies](#strategies)).
+- **Sinyal** — `Yok` (the selected strategy trades on its own) or
+  `Akıllı Cüzdan Onayı` (candidates are also required to match a
   [tracked wallet's recent buy](#smart-money-confirmation-filter)).
 
 Saving calls `POST /api/strategy` (`GET /api/strategy` reads the current
@@ -221,6 +222,32 @@ Both are computed once, at the moment the decision is made
 for open positions and appended to `trades.csv` for closed ones — so the
 explanation always matches the state that was actually used to decide,
 not a value recomputed later from possibly-changed settings.
+
+## Strategies
+
+Selected via `POLYBOT_STRATEGY` (env var, App Configuration, or the control
+panel's **Strateji** dropdown) -- exactly one is active at a time, and both
+scan YES and NO of every market as independent long-only tokens (see
+[How it works](#how-it-works)). Exits (take-profit/stop-loss/max-holding)
+are strategy-agnostic and identical for both (`polybot/risk.py`).
+
+- **`momentum`** (default, `polybot/strategy/momentum.py`) — bets a price
+  move continues: enters when the relative change from the oldest to the
+  newest point in the `POLYBOT_LOOKBACK_MINUTES` window clears
+  `POLYBOT_MOMENTUM_THRESHOLD`.
+- **`mean_reversion`** (`polybot/strategy/mean_reversion.py`) — the mirror
+  image: enters when the current price sits at least
+  `POLYBOT_MEAN_REVERSION_THRESHOLD` *below* its own average over the same
+  window, betting on a bounce back toward that average rather than a
+  continued move. A token overextended *upward* doesn't need its own
+  downward case -- its complementary outcome (YES vs NO) shows up
+  overextended downward on its own, same YES/NO symmetry momentum relies on.
+
+Both are simple, single-signal strategies by design (no combining
+indicators, no backtesting harness) -- realistic starting points to compare
+against live paper-trading results and trade-log analysis, not tuned/backtested
+systems. Switching between them (or back) takes effect on the next full scan
+cycle, no redeploy needed.
 
 ## Smart-money confirmation filter
 

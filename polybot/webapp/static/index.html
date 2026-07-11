@@ -85,7 +85,7 @@
 <body>
 <main>
   <h1>polybot</h1>
-  <p class="subtitle">Polymarket momentum bot &middot; kontrol paneli</p>
+  <p class="subtitle">Polymarket trading bot &middot; kontrol paneli</p>
 
   <div id="conn-error-box" class="error-box" style="display:none">
     Sunucuya ulaşılamıyor. Bağlantı sorunu olabilir (ağ/mobil veri) — sayfa otomatik olarak yeniden denemeye devam ediyor, veri geldiğinde bu uyarı kaybolur.
@@ -128,7 +128,7 @@
       </div>
       <button class="primary" id="btn-save-strategy" style="align-self: flex-end">Kaydet</button>
     </div>
-    <p class="hint">"Sinyal: Yok" seçilirse bot yalnızca momentum ile çalışır. "Akıllı Cüzdan Onayı" seçilirse, momentum sinyali yalnızca izlenen yüksek kazançlı bir cüzdan da aynı yönde alım yapmışsa işleme girer.</p>
+    <p class="hint">"Strateji" hangi sinyal mantığının kullanılacağını seçer (Momentum: hareketin devam edeceğini varsayar; Mean Reversion: fiyatın kendi ortalamasına geri döneceğini varsayar). "Sinyal: Yok" seçilirse seçili strateji tek başına çalışır. "Akıllı Cüzdan Onayı" seçilirse, üretilen sinyal yalnızca izlenen yüksek kazançlı bir cüzdan da aynı yönde alım yapmışsa işleme girer.</p>
     <div class="save-note" id="strategy-save-note"></div>
   </div>
 
@@ -302,7 +302,7 @@ $("positions-body").addEventListener("click", async (e) => {
   }
 });
 
-const STRATEGY_LABELS = { momentum: "Momentum" };
+const STRATEGY_LABELS = { momentum: "Momentum", mean_reversion: "Mean Reversion" };
 const SIGNAL_FILTER_LABELS = { none: "Yok (sadece momentum)", smart_money: "Akıllı Cüzdan Onayı" };
 
 function fillSelect(select, options, labels, selected) {

@@ -20,10 +20,7 @@ def _env_bool(name: str, default: bool) -> bool:
     return val.strip().lower() in ("1", "true", "yes", "on")
 
 
-# Only "momentum" exists today; kept as a list (not a bare constant) so the
-# web UI's strategy dropdown and the validation below have one place to grow
-# from if a second strategy is ever added.
-STRATEGY_CHOICES = ["momentum"]
+STRATEGY_CHOICES = ["momentum", "mean_reversion"]
 
 # "none" = momentum signals trade on their own. "smart_money" = a momentum
 # signal only survives if a tracked high-PnL wallet also just bought the
@@ -84,12 +81,21 @@ class Settings:
     min_price: float = field(default_factory=lambda: _env_float("POLYBOT_MIN_PRICE", 0.15))
     max_price: float = field(default_factory=lambda: _env_float("POLYBOT_MAX_PRICE", 0.85))
 
-    # Momentum strategy
+    # Shared lookback window (both strategies below use it)
     lookback_minutes: int = field(
         default_factory=lambda: _env_int("POLYBOT_LOOKBACK_MINUTES", 15)
     )
+
+    # Momentum strategy (POLYBOT_STRATEGY=momentum): bet a price move continues.
     momentum_threshold: float = field(
         default_factory=lambda: _env_float("POLYBOT_MOMENTUM_THRESHOLD", 0.08)
+    )
+
+    # Mean-reversion strategy (POLYBOT_STRATEGY=mean_reversion): bet a price
+    # that has dropped this far below its own lookback-window average bounces
+    # back toward it (see polybot/strategy/mean_reversion.py).
+    mean_reversion_threshold: float = field(
+        default_factory=lambda: _env_float("POLYBOT_MEAN_REVERSION_THRESHOLD", 0.08)
     )
 
     # Exit rules

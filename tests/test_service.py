@@ -188,7 +188,7 @@ def test_get_strategy_info_defaults(tmp_path, monkeypatch):
         info = service.get_strategy_info()
         assert info["strategy"] == "momentum"
         assert info["signal_filter"] == "none"
-        assert info["strategy_options"] == ["momentum"]
+        assert info["strategy_options"] == ["momentum", "mean_reversion"]
         assert "smart_money" in info["signal_filter_options"]
         assert info["overridden"] is False
     finally:

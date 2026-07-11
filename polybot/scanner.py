@@ -8,18 +8,24 @@ from .api import clob
 from .config import Settings
 from .models import Market, Signal
 from .portfolio import Portfolio
-from .strategy import momentum
+from .strategy import mean_reversion, momentum
 from .strategy.smart_money import SmartMoneyTracker
 
 logger = logging.getLogger(__name__)
 
 MAX_WORKERS = 20
 
+_STRATEGIES = {
+    "momentum": momentum.evaluate,
+    "mean_reversion": mean_reversion.evaluate,
+}
+
 
 def _evaluate_token(settings: Settings, market: Market, token_id: str) -> Signal | None:
     history = clob.get_price_history(settings, token_id, settings.lookback_minutes)
     book = clob.get_order_book(settings, token_id)
-    return momentum.evaluate(settings, market, token_id, history, book)
+    evaluate = _STRATEGIES[settings.strategy]
+    return evaluate(settings, market, token_id, history, book)
 
 
 def generate_signals(

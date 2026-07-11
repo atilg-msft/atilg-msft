@@ -104,3 +104,45 @@ def test_generate_signals_skips_the_locked_out_opposite_outcome(tmp_path, monkey
 
     # tok-no is permanently locked out; tok-yes (same side) is still a valid signal.
     assert [s.token_id for s in signals] == ["tok-yes"]
+
+
+def test_generate_signals_uses_mean_reversion_when_selected(tmp_path, monkeypatch):
+    settings = Settings(
+        data_dir=tmp_path,
+        strategy="mean_reversion",
+        mean_reversion_threshold=0.05,
+        min_price=0.05,
+        max_price=0.95,
+    )
+    market = Market(
+        condition_id="0xcond",
+        question="Will it happen?",
+        slug="will-it-happen",
+        token_ids=["tok-yes"],
+        outcomes=["Yes"],
+        volume_24h=10_000,
+        liquidity=5_000,
+    )
+
+    def fake_history(settings, token_id, lookback_minutes):
+        span = lookback_minutes * 60
+        # Rising momentum would reject this under the momentum strategy, but
+        # mean-reversion only cares that the last point is below average --
+        # which it isn't here, so this exercises the "wrong direction" branch.
+        return [
+            PricePoint(ts=0, price=0.50),
+            PricePoint(ts=span // 2, price=0.50),
+            PricePoint(ts=span, price=0.40),  # below the window average -> reversion candidate
+        ]
+
+    def fake_book(settings, token_id):
+        return OrderBook(token_id=token_id, best_bid=0.39, best_ask=0.40)
+
+    monkeypatch.setattr("polybot.scanner.clob.get_price_history", fake_history)
+    monkeypatch.setattr("polybot.scanner.clob.get_order_book", fake_book)
+
+    portfolio = Portfolio(cash=1000)
+    signals = generate_signals(settings, [market], portfolio, datetime.now(timezone.utc))
+
+    assert [s.token_id for s in signals] == ["tok-yes"]
+    assert "Mean-reversion" in signals[0].reason
