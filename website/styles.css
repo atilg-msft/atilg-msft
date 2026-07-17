@@ -224,28 +224,6 @@ section + section {
   margin-bottom: 8px;
 }
 
-.credential-badge {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin-top: 24px;
-  padding: 16px 18px;
-  border-radius: 14px;
-  background: rgba(53, 214, 192, 0.08);
-  border: 1px solid rgba(53, 214, 192, 0.25);
-}
-
-.credential-icon {
-  font-size: 1.2rem;
-  line-height: 1.4;
-}
-
-.credential-badge p {
-  margin: 0;
-  color: var(--text);
-  font-size: 0.92rem;
-}
-
 .cta-box {
   margin-top: 24px;
   padding: 20px;
@@ -263,55 +241,6 @@ section + section {
 .btn-sm {
   padding: 10px 20px;
   font-size: 0.88rem;
-}
-
-.differentiator {
-  margin-top: 36px;
-  padding: 28px 32px;
-  border-radius: 18px;
-  background: var(--bg-alt);
-  border: 1px solid var(--border);
-}
-
-.differentiator p {
-  margin: 0;
-  color: var(--text-dim);
-}
-
-.differentiator strong {
-  color: var(--text);
-}
-
-/* Approach */
-
-.process {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 24px;
-}
-
-.process-step {
-  padding: 8px 0;
-}
-
-.step-num {
-  display: block;
-  font-size: 0.85rem;
-  font-weight: 700;
-  color: var(--accent-2);
-  letter-spacing: 0.08em;
-  margin-bottom: 12px;
-}
-
-.process-step h3 {
-  margin: 0 0 10px;
-  font-size: 1.1rem;
-}
-
-.process-step p {
-  margin: 0;
-  color: var(--text-dim);
-  font-size: 0.95rem;
 }
 
 /* About */
