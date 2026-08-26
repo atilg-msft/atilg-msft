@@ -352,6 +352,36 @@ section + section {
   text-decoration: underline;
 }
 
+.founder-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 20px 0;
+  padding: 10px 18px;
+  background: var(--surface);
+  border: 3px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--ink-shadow-sm);
+  transform: rotate(-1deg);
+}
+
+.founder-name {
+  font-weight: 800;
+  color: var(--text);
+}
+
+.founder-title {
+  font-weight: 800;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: var(--accent);
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
 .legal-link {
   display: inline-flex;
   align-items: center;
